@@ -8,14 +8,23 @@
 
 /* Begin PBXFileReference section */
 		D0F1000000000000000000A4 /* DiscFree.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DiscFree.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D0F1000000000000000000C3 /* DiscFreeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DiscFreeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D0F1000000000000000000A5 /* DiscFree */ = {isa = PBXFileSystemSynchronizedRootGroup; path = DiscFree; sourceTree = "<group>"; };
+		D0F1000000000000000000C1 /* DiscFreeTests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = DiscFreeTests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		D0F1000000000000000000A8 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0F1000000000000000000C5 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -29,6 +38,7 @@
 			isa = PBXGroup;
 			children = (
 				D0F1000000000000000000A5 /* DiscFree */,
+				D0F1000000000000000000C1 /* DiscFreeTests */,
 				D0F1000000000000000000A3 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -37,6 +47,7 @@
 			isa = PBXGroup;
 			children = (
 				D0F1000000000000000000A4 /* DiscFree.app */,
+				D0F1000000000000000000C3 /* DiscFreeTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -66,6 +77,29 @@
 			productReference = D0F1000000000000000000A4 /* DiscFree.app */;
 			productType = "com.apple.product-type.application";
 		};
+		D0F1000000000000000000C2 /* DiscFreeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0F1000000000000000000C7 /* Build configuration list for PBXNativeTarget "DiscFreeTests" */;
+			buildPhases = (
+				D0F1000000000000000000C4 /* Sources */,
+				D0F1000000000000000000C5 /* Frameworks */,
+				D0F1000000000000000000C6 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D0F1000000000000000000CA /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				D0F1000000000000000000C1 /* DiscFreeTests */,
+			);
+			name = DiscFreeTests;
+			packageProductDependencies = (
+			);
+			productName = DiscFreeTests;
+			productReference = D0F1000000000000000000C3 /* DiscFreeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -78,6 +112,10 @@
 				TargetAttributes = {
 					D0F1000000000000000000A6 = {
 						CreatedOnToolsVersion = 26.6;
+					};
+					D0F1000000000000000000C2 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = D0F1000000000000000000A6;
 					};
 				};
 			};
@@ -97,12 +135,20 @@
 			projectRoot = "";
 			targets = (
 				D0F1000000000000000000A6 /* DiscFree */,
+				D0F1000000000000000000C2 /* DiscFreeTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		D0F1000000000000000000A9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0F1000000000000000000C6 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -119,7 +165,32 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D0F1000000000000000000C4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D0F1000000000000000000CA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D0F1000000000000000000A6 /* DiscFree */;
+			targetProxy = D0F1000000000000000000CB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		D0F1000000000000000000CB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D0F1000000000000000000A1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D0F1000000000000000000A6;
+			remoteInfo = DiscFree;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin XCBuildConfiguration section */
 		D0F1000000000000000000B3 /* Debug */ = {
@@ -288,6 +359,40 @@
 			};
 			name = Release;
 		};
+		D0F1000000000000000000C8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.cosmoshark.DiscFreeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DiscFree.app/Contents/MacOS/DiscFree";
+			};
+			name = Debug;
+		};
+		D0F1000000000000000000C9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.cosmoshark.DiscFreeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DiscFree.app/Contents/MacOS/DiscFree";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -305,6 +410,15 @@
 			buildConfigurations = (
 				D0F1000000000000000000B5 /* Debug */,
 				D0F1000000000000000000B6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D0F1000000000000000000C7 /* Build configuration list for PBXNativeTarget "DiscFreeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D0F1000000000000000000C8 /* Debug */,
+				D0F1000000000000000000C9 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
