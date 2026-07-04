@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct StartView: View {
     let model: AppModel
@@ -21,6 +22,14 @@ struct StartView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+
+            if model.isFullDiskAccessMissing {
+                FullDiskAccessBanner(
+                    onOpenSettings: { FullDiskAccessCheck.openSystemSettings() },
+                    onRecheck: { model.refreshFullDiskAccess() }
+                )
+                .padding(.top, 4)
+            }
 
             if !volumes.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -54,6 +63,9 @@ struct StartView: View {
         }
         .padding(40)
         .task { volumes = FolderPicker.mountedVolumes() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.refreshFullDiskAccess()
+        }
     }
 
     private func chooseFolder() {

@@ -42,13 +42,21 @@ struct ResultView: View {
 
             Divider()
 
-            HStack {
+            HStack(spacing: 12) {
                 Button {
                     model.returnToStart()
                 } label: {
                     Label("New Scan", systemImage: "arrow.left")
                 }
                 Spacer()
+                if model.unreadableCount > 0 {
+                    UnreadableIndicator(
+                        count: model.unreadableCount,
+                        fdaMissing: model.isFullDiskAccessMissing,
+                        onOpenSettings: { FullDiskAccessCheck.openSystemSettings() }
+                    )
+                    .font(.callout)
+                }
                 if let focus = model.focus {
                     Text("\(focus.displayName) — \(byteString(focus.allocatedSize))")
                         .foregroundStyle(.secondary)

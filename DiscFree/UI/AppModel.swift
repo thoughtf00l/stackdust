@@ -30,9 +30,20 @@ final class AppModel {
     /// Last deletion error; non-nil drives the error alert.
     private(set) var errorMessage: String?
 
+    /// Whether the app can read protected locations; drives the Full Disk Access hint.
+    private(set) var fullDiskAccess: FullDiskAccessStatus = .undetermined
+    /// Number of unreadable directories across the whole scanned tree. Computed off the main
+    /// thread once per scan and after each deletion — never walked per frame.
+    private(set) var unreadableCount: Int = 0
+
     private let scanner = DiskScanner()
     private var scanTask: Task<Void, Never>?
     private var layoutTask: Task<Void, Never>?
+    private var unreadableTask: Task<Void, Never>?
+
+    init() {
+        refreshFullDiskAccess()
+    }
 
     /// Root-to-focus chain, for the breadcrumb.
     var focusPath: [FileNode] {
@@ -58,6 +69,7 @@ final class AppModel {
         rows = []
         pendingTrash = nil
         errorMessage = nil
+        unreadableCount = 0
 
         scanTask = Task { [weak self] in
             guard let self else { return }
@@ -70,6 +82,7 @@ final class AppModel {
                         self.root = tree
                         self.setFocus(tree)
                         self.phase = .result
+                        self.recountUnreadable(in: tree)
                     }
                 }
             } catch is CancellationError {
@@ -96,6 +109,8 @@ final class AppModel {
         rows = []
         pendingTrash = nil
         errorMessage = nil
+        unreadableCount = 0
+        refreshFullDiskAccess()
     }
 
     // MARK: - Navigation
@@ -169,8 +184,42 @@ final class AppModel {
             try FileManager.default.trashItem(at: URL(fileURLWithPath: node.path), resultingItemURL: nil)
             try TreeEditor.remove(node, keeping: focus)
             rebuild(for: focus)
+            if let root { recountUnreadable(in: root) }
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Full Disk Access
+
+    func refreshFullDiskAccess() {
+        fullDiskAccess = FullDiskAccessCheck().status()
+    }
+
+    /// Whether the app has read enough of the disk to be complete.
+    var isFullDiskAccessMissing: Bool {
+        fullDiskAccess == .denied
+    }
+
+    /// Counts unreadable directories across the whole tree off the main thread.
+    private func recountUnreadable(in tree: FileNode) {
+        unreadableTask?.cancel()
+        unreadableTask = Task { [weak self] in
+            let count = await Task.detached(priority: .utility) {
+                Self.unreadableNodeCount(tree)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.unreadableCount = count
+        }
+    }
+
+    private nonisolated static func unreadableNodeCount(_ node: FileNode) -> Int {
+        var count = node.isUnreadable ? 1 : 0
+        if let children = node.children {
+            for child in children {
+                count += unreadableNodeCount(child)
+            }
+        }
+        return count
     }
 }
