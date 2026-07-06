@@ -59,12 +59,32 @@ final class AppModel {
     /// thread once per scan and after each deletion — never walked per frame.
     private(set) var unreadableCount: Int = 0
 
+    /// When the tree on screen was produced by a scan. Comes from the snapshot header when
+    /// the tree was loaded from cache, or "now" when a scan finishes.
+    private(set) var lastScanDate: Date?
+    /// Non-nil while a background rescan of a cache-loaded tree is running; drives the
+    /// refresh bar in the result view.
+    private(set) var refreshProgress: ScanProgress?
+    /// The cached tree's total bytes, used to estimate background-rescan progress.
+    private var expectedRefreshBytes: Int64 = 0
+
+    /// Fraction for the refresh bar: bytes scanned against the previous scan's total,
+    /// saturating below 1 because the disk may have grown since. Nil → indeterminate.
+    var refreshFraction: Double? {
+        guard let refreshProgress, expectedRefreshBytes > 0 else { return nil }
+        return min(0.99, Double(refreshProgress.bytesAccumulated) / Double(expectedRefreshBytes))
+    }
+
     private let scanner = DiskScanner()
     private let catalog = DevItemCatalog()
+    private let snapshotStore = SnapshotStore()
     private var scanTask: Task<Void, Never>?
     private var layoutTask: Task<Void, Never>?
     private var unreadableTask: Task<Void, Never>?
     private var classifyTask: Task<Void, Never>?
+    private var refreshTask: Task<Void, Never>?
+    private var snapshotSaveTask: Task<Void, Never>?
+    private var didAttemptResume = false
 
     init() {
         refreshFullDiskAccess()
@@ -84,8 +104,40 @@ final class AppModel {
 
     // MARK: - Scanning
 
+    /// Opens the most recent cached scan, if any, instead of starting at the picker: the
+    /// tree appears immediately (marked with its scan date) and a background rescan starts
+    /// to bring it up to date. Called once when the UI appears; no-op without a cache.
+    func attemptResume() {
+        guard !didAttemptResume else { return }
+        didAttemptResume = true
+        guard phase == .idle, root == nil else { return }
+
+        let store = snapshotStore
+        Task { [weak self] in
+            let loaded = await Task.detached(priority: .userInitiated) {
+                () -> (entry: SnapshotStore.Entry, tree: FileNode)? in
+                guard let entry = store.mostRecent(),
+                      let tree = try? store.loadTree(entry) else { return nil }
+                return (entry, tree)
+            }.value
+            guard let self, let loaded, self.phase == .idle, self.root == nil else { return }
+
+            self.root = loaded.tree
+            self.lastScanDate = loaded.entry.header.scanDate
+            self.setFocus(loaded.tree)
+            self.phase = .result
+            self.recountUnreadable(in: loaded.tree)
+            self.classify(loaded.tree)
+            self.startBackgroundRefresh(
+                at: URL(fileURLWithPath: loaded.entry.header.rootPath),
+                expectedBytes: loaded.entry.header.totalBytes
+            )
+        }
+    }
+
     func startScan(at url: URL) {
         cancelScan()
+        cancelRefresh()
         classifyTask?.cancel()
         phase = .scanning
         progress = ScanProgress(itemsScanned: 0, bytesAccumulated: 0, currentPath: url.path)
@@ -109,8 +161,10 @@ final class AppModel {
                         self.root = tree
                         self.setFocus(tree)
                         self.phase = .result
+                        self.lastScanDate = Date()
                         self.recountUnreadable(in: tree)
                         self.classify(tree)
+                        self.saveSnapshot(of: tree)
                     }
                 }
             } catch is CancellationError {
@@ -128,10 +182,12 @@ final class AppModel {
 
     func returnToStart() {
         cancelScan()
+        cancelRefresh()
         layoutTask?.cancel()
         layoutTask = nil
         classifyTask?.cancel()
         classifyTask = nil
+        lastScanDate = nil
         phase = .idle
         root = nil
         focus = nil
@@ -206,6 +262,69 @@ final class AppModel {
         }
     }
 
+    // MARK: - Background refresh & snapshots
+
+    /// Rescans `url` while the cache-loaded tree stays on screen, then swaps the fresh tree
+    /// in, restoring the focus to the same path (or its nearest surviving ancestor).
+    private func startBackgroundRefresh(at url: URL, expectedBytes: Int64) {
+        cancelRefresh()
+        expectedRefreshBytes = expectedBytes
+        refreshProgress = ScanProgress(itemsScanned: 0, bytesAccumulated: 0, currentPath: url.path)
+
+        refreshTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await update in self.scanner.scan(at: url) {
+                    switch update {
+                    case .progress(let progress):
+                        self.refreshProgress = progress
+                    case .finished(let tree):
+                        self.adoptRefreshedTree(tree)
+                    }
+                }
+            } catch is CancellationError {
+                self.refreshProgress = nil
+            } catch {
+                // The cached root may be gone (unmounted disk, deleted folder). The stale
+                // tree on screen would be pure fiction at this point — return to the picker.
+                self.refreshProgress = nil
+                self.returnToStart()
+            }
+        }
+    }
+
+    private func adoptRefreshedTree(_ tree: FileNode) {
+        let focusComponents = focus.map { TreePath.components(of: $0) } ?? []
+        root = tree
+        setFocus(TreePath.resolve(focusComponents, in: tree))
+        lastScanDate = Date()
+        refreshProgress = nil
+        recountUnreadable(in: tree)
+        classify(tree)
+        saveSnapshot(of: tree)
+    }
+
+    private func cancelRefresh() {
+        refreshTask?.cancel()
+        refreshTask = nil
+        refreshProgress = nil
+        expectedRefreshBytes = 0
+    }
+
+    /// Serializes the tree to the snapshot cache off the main thread. Cancel-and-replace,
+    /// like the classify pass: a newer save supersedes an in-flight one. Failures are
+    /// swallowed — the cache is an optimization, never a source of errors.
+    private func saveSnapshot(of tree: FileNode) {
+        snapshotSaveTask?.cancel()
+        let store = snapshotStore
+        let date = lastScanDate ?? Date()
+        snapshotSaveTask = Task {
+            await Task.detached(priority: .utility) {
+                try? store.save(tree, scanDate: date)
+            }.value
+        }
+    }
+
     // MARK: - Deletion
 
     func reveal(_ node: FileNode) {
@@ -242,6 +361,7 @@ final class AppModel {
                 // Re-classify: deleting inside a dev root leaves ancestor devSize stale, and
                 // deleting a guard file (e.g. Cargo.toml) can change which nodes match.
                 classify(root)
+                saveSnapshot(of: root)
             }
         } catch {
             errorMessage = error.localizedDescription

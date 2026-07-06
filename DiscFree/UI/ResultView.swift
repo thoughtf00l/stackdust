@@ -27,6 +27,15 @@ struct ResultView: View {
 
             Divider()
 
+            if model.refreshProgress != nil {
+                RefreshBar(
+                    fraction: model.refreshFraction,
+                    bytesScanned: model.refreshProgress?.bytesAccumulated ?? 0,
+                    dataDate: model.lastScanDate
+                )
+                Divider()
+            }
+
             if let focus = model.focus {
                 if model.displayMode == .devOnly && model.focusDisplayTotal == 0 {
                     emptyDevState
@@ -130,6 +139,42 @@ struct ResultView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// The thin strip shown while a background rescan refreshes a cache-loaded tree: a progress
+/// bar (byte-based against the previous scan's total, indeterminate when unknown) plus a
+/// caption naming the on-screen data's age.
+private struct RefreshBar: View {
+    let fraction: Double?
+    let bytesScanned: Int64
+    let dataDate: Date?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let fraction {
+                ProgressView(value: fraction)
+            } else {
+                ProgressView()
+                    .progressViewStyle(.linear)
+            }
+            Text(caption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+    }
+
+    private var caption: String {
+        var text = "Refreshing — \(byteString(bytesScanned)) scanned"
+        if let dataDate {
+            text += " · data from \(dataDate.formatted(date: .omitted, time: .shortened))"
+        }
+        return text
     }
 }
 

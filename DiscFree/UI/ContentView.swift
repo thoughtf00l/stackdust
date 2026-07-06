@@ -17,6 +17,7 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 720, minHeight: 560)
+        .task { model.attemptResume() }
     }
 }
 
