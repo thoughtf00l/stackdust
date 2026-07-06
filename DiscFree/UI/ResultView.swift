@@ -8,33 +8,52 @@ struct ResultView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            BreadcrumbBar(path: model.focusPath) { model.jump(to: $0) }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+            HStack(spacing: 8) {
+                BreadcrumbBar(path: model.focusPath) { model.jump(to: $0) }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Picker("Display mode", selection: displayModeBinding) {
+                    Text("All").tag(DisplayMode.all)
+                    Text("Dev").tag(DisplayMode.devHighlight)
+                    Text("Dev Only").tag(DisplayMode.devOnly)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
 
             Divider()
 
             if let focus = model.focus {
-                HSplitView {
-                    SunburstView(
-                        segments: model.segments,
-                        focus: focus,
-                        onDrill: { model.drill(into: $0) },
-                        onAscend: { model.ascend() },
-                        hovered: $hovered
-                    )
-                    .frame(minWidth: 320, idealWidth: 480)
-                    .padding(16)
+                if model.displayMode == .devOnly && model.focusDisplayTotal == 0 {
+                    emptyDevState
+                } else {
+                    HSplitView {
+                        SunburstView(
+                            segments: model.segments,
+                            focus: focus,
+                            focusTotal: model.focusDisplayTotal,
+                            mode: model.displayMode,
+                            onDrill: { model.drill(into: $0) },
+                            onAscend: { model.ascend() },
+                            hovered: $hovered
+                        )
+                        .frame(minWidth: 320, idealWidth: 480)
+                        .padding(16)
 
-                    ContentsPanel(
-                        focusTotal: focus.allocatedSize,
-                        rows: model.rows,
-                        hovered: $hovered,
-                        onDrill: { model.drill(into: $0) },
-                        onReveal: { model.reveal($0) },
-                        onTrash: { model.requestTrash($0) }
-                    )
-                    .frame(minWidth: 300, idealWidth: 360)
+                        ContentsPanel(
+                            focusTotal: model.focusDisplayTotal,
+                            rows: model.rows,
+                            mode: model.displayMode,
+                            hovered: $hovered,
+                            onDrill: { model.drill(into: $0) },
+                            onReveal: { model.reveal($0) },
+                            onTrash: { model.requestTrash($0) }
+                        )
+                        .frame(minWidth: 300, idealWidth: 360)
+                    }
                 }
             } else {
                 Spacer()
@@ -58,7 +77,7 @@ struct ResultView: View {
                     .font(.callout)
                 }
                 if let focus = model.focus {
-                    Text("\(focus.displayName) — \(byteString(focus.allocatedSize))")
+                    Text("\(focus.displayName) — \(byteString(model.focusDisplayTotal))")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                         .lineLimit(1)
@@ -93,6 +112,23 @@ struct ResultView: View {
         } message: { message in
             Text(message)
         }
+    }
+
+    private var displayModeBinding: Binding<DisplayMode> {
+        Binding(get: { model.displayMode }, set: { model.displayMode = $0 })
+    }
+
+    private var emptyDevState: some View {
+        VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: "wrench.and.screwdriver")
+                .font(.system(size: 34))
+                .foregroundStyle(.tertiary)
+            Text("No developer items in this folder")
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

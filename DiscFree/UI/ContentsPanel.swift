@@ -3,7 +3,8 @@ import SwiftUI
 /// The right-hand contents list: the focus node's children, largest first.
 struct ContentsPanel: View {
     let focusTotal: Int64
-    let rows: [FileNode]
+    let rows: [ContentsPanelRow]
+    let mode: DisplayMode
     @Binding var hovered: FileNode?
     let onDrill: (FileNode) -> Void
     let onReveal: (FileNode) -> Void
@@ -11,29 +12,34 @@ struct ContentsPanel: View {
 
     var body: some View {
         List {
-            ForEach(Array(rows.enumerated()), id: \.element.id) { index, node in
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 ContentsRow(
-                    node: node,
+                    row: row,
                     focusTotal: focusTotal,
+                    mode: mode,
                     hue: rows.count > 0 ? Double(index) / Double(rows.count) : 0,
-                    isHovered: hovered === node
+                    isHovered: hovered === row.node
                 )
                 .contentShape(Rectangle())
-                .onTapGesture { onDrill(node) }
+                .onTapGesture { onDrill(row.node) }
                 .onHover { isInside in
-                    if isInside { hovered = node }
-                    else if hovered === node { hovered = nil }
+                    if isInside { hovered = row.node }
+                    else if hovered === row.node { hovered = nil }
                 }
                 .contextMenu {
                     Button {
-                        onReveal(node)
+                        onReveal(row.node)
                     } label: {
                         Label("Reveal in Finder", systemImage: "magnifyingglass")
                     }
-                    Button(role: .destructive) {
-                        onTrash(node)
-                    } label: {
-                        Label("Move to Trash…", systemImage: "trash")
+                    // In .devOnly a container that merely holds dev items must not offer Trash:
+                    // trashing it would delete the non-dev content the mode hides.
+                    if mode != .devOnly || row.isDev {
+                        Button(role: .destructive) {
+                            onTrash(row.node)
+                        } label: {
+                            Label("Move to Trash…", systemImage: "trash")
+                        }
                     }
                 }
             }
@@ -43,17 +49,24 @@ struct ContentsPanel: View {
 }
 
 private struct ContentsRow: View {
-    let node: FileNode
+    let row: ContentsPanelRow
     let focusTotal: Int64
+    let mode: DisplayMode
     let hue: Double
     let isHovered: Bool
 
+    private var node: FileNode { row.node }
+
     private var share: Double {
-        focusTotal > 0 ? Double(node.allocatedSize) / Double(focusTotal) : 0
+        focusTotal > 0 ? Double(row.displaySize) / Double(focusTotal) : 0
     }
 
     private var swatch: Color {
-        node.isUnreadable ? Color(white: 0.55) : Color(hue: hue, saturation: 0.7, brightness: 0.82)
+        if node.isUnreadable { return Color(white: 0.55) }
+        // Match the sunburst: non-dev rows go gray in .devHighlight, kept distinct from the
+        // unreadable gray by a lighter shade.
+        if mode == .devHighlight && !row.isDev { return Color(hue: 0, saturation: 0, brightness: 0.72) }
+        return Color(hue: hue, saturation: 0.7, brightness: 0.82)
     }
 
     var body: some View {
@@ -70,7 +83,7 @@ private struct ContentsRow: View {
 
             shareBar
 
-            Text(byteString(node.allocatedSize))
+            Text(byteString(row.displaySize))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(width: 78, alignment: .trailing)

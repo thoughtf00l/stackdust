@@ -2,6 +2,16 @@ import SwiftUI
 import Observation
 import AppKit
 
+/// How the sunburst and contents panel present the tree.
+enum DisplayMode: Sendable {
+    /// Every node, sized by `allocatedSize`. The default.
+    case all
+    /// Same geometry and sizes as `.all`, but nodes outside a dev item are drawn gray.
+    case devHighlight
+    /// Only developer-reclaimable items, sized by their dev bytes.
+    case devOnly
+}
+
 /// Drives the whole app: the start → scanning → result state machine, the scan task and
 /// its cancellation, and the (off-main-thread) sunburst layout for the current focus node.
 @MainActor
@@ -19,8 +29,20 @@ final class AppModel {
     private(set) var root: FileNode?
     private(set) var segments: [SunburstSegment] = []
 
-    /// The focus node's direct children, sorted by size descending (the contents panel rows).
-    private(set) var rows: [FileNode] = []
+    /// The focus node's direct children as panel rows, sized and filtered for `displayMode`.
+    private(set) var rows: [ContentsPanelRow] = []
+
+    /// The size shown for the current focus in `displayMode` (its `allocatedSize`, or its
+    /// effective dev total in `.devOnly`). Drives share bars, the center label, and the status.
+    private(set) var focusDisplayTotal: Int64 = 0
+
+    /// The presentation mode. Changing it recomputes the layout for the current focus.
+    var displayMode: DisplayMode = .all {
+        didSet {
+            guard displayMode != oldValue, let focus else { return }
+            rebuild(for: focus)
+        }
+    }
 
     /// Current focus (center of the sunburst). Changing it recomputes the layout.
     private(set) var focus: FileNode?
@@ -37,9 +59,11 @@ final class AppModel {
     private(set) var unreadableCount: Int = 0
 
     private let scanner = DiskScanner()
+    private let catalog = DevItemCatalog()
     private var scanTask: Task<Void, Never>?
     private var layoutTask: Task<Void, Never>?
     private var unreadableTask: Task<Void, Never>?
+    private var classifyTask: Task<Void, Never>?
 
     init() {
         refreshFullDiskAccess()
@@ -61,12 +85,14 @@ final class AppModel {
 
     func startScan(at url: URL) {
         cancelScan()
+        classifyTask?.cancel()
         phase = .scanning
         progress = ScanProgress(itemsScanned: 0, bytesAccumulated: 0, currentPath: url.path)
         root = nil
         focus = nil
         segments = []
         rows = []
+        focusDisplayTotal = 0
         pendingTrash = nil
         errorMessage = nil
         unreadableCount = 0
@@ -83,6 +109,7 @@ final class AppModel {
                         self.setFocus(tree)
                         self.phase = .result
                         self.recountUnreadable(in: tree)
+                        self.classify(tree)
                     }
                 }
             } catch is CancellationError {
@@ -102,11 +129,14 @@ final class AppModel {
         cancelScan()
         layoutTask?.cancel()
         layoutTask = nil
+        classifyTask?.cancel()
+        classifyTask = nil
         phase = .idle
         root = nil
         focus = nil
         segments = []
         rows = []
+        focusDisplayTotal = 0
         pendingTrash = nil
         errorMessage = nil
         unreadableCount = 0
@@ -137,19 +167,41 @@ final class AppModel {
         rebuild(for: node)
     }
 
-    /// Recomputes the sunburst segments and the panel rows for `node` off the main thread.
+    /// Recomputes the sunburst segments, the panel rows, and the focus's display total for
+    /// `node` in the current mode, off the main thread.
     private func rebuild(for node: FileNode) {
         layoutTask?.cancel()
+        let mode = displayMode
         layoutTask = Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
-                () -> (segments: [SunburstSegment], rows: [FileNode]) in
-                let segments = SunburstLayout.build(focus: node)
-                let rows = (node.children ?? []).sorted { $0.allocatedSize > $1.allocatedSize }
-                return (segments, rows)
+                () -> (segments: [SunburstSegment], rows: [ContentsPanelRow], total: Int64) in
+                let segments = SunburstLayout.build(focus: node, mode: mode)
+                let rows = SunburstLayout.rows(focus: node, mode: mode)
+                let total = SunburstLayout.focusDisplayTotal(focus: node, mode: mode)
+                return (segments, rows, total)
             }.value
             guard !Task.isCancelled else { return }
             self?.segments = result.segments
             self?.rows = result.rows
+            self?.focusDisplayTotal = result.total
+        }
+    }
+
+    /// Classifies the tree against the dev-item catalog off the main thread, then rebuilds if
+    /// the current mode depends on the result. Mirrors `recountUnreadable`'s cancel-and-replace
+    /// pattern: a later trash may mutate the tree, so an in-flight pass is cancelled and reissued
+    /// on the mutated tree rather than serialized against it.
+    private func classify(_ tree: FileNode) {
+        classifyTask?.cancel()
+        let catalog = catalog
+        classifyTask = Task { [weak self] in
+            await Task.detached(priority: .utility) {
+                DevClassifier.classify(tree, using: catalog)
+            }.value
+            guard !Task.isCancelled, let self else { return }
+            if self.displayMode != .all, let focus = self.focus {
+                self.rebuild(for: focus)
+            }
         }
     }
 
@@ -184,7 +236,12 @@ final class AppModel {
             try FileManager.default.trashItem(at: URL(fileURLWithPath: node.path), resultingItemURL: nil)
             try TreeEditor.remove(node, keeping: focus)
             rebuild(for: focus)
-            if let root { recountUnreadable(in: root) }
+            if let root {
+                recountUnreadable(in: root)
+                // Re-classify: deleting inside a dev root leaves ancestor devSize stale, and
+                // deleting a guard file (e.g. Cargo.toml) can change which nodes match.
+                classify(root)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
