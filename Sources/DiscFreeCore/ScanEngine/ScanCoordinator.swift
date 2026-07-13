@@ -98,9 +98,43 @@ final class ScanCoordinator: @unchecked Sendable {
         return root
     }
 
+    // MARK: - Cloud-eviction (dataless) policy
+
+    // iCloud / File Provider directories can be *dataless* (evicted): their contents live in
+    // the cloud, not on local disk. Opening such a directory with `open(2)` makes
+    // fileproviderd materialize (download) the whole package, blocking the call for minutes
+    // or forever. With VFS materialization disabled on the calling thread, `open(2)` instead
+    // fails fast with `EDEADLK`, which the scanner treats as unreadable (correct for a
+    // disk-space analyzer: evicted content occupies no local disk space). The policy is
+    // per-thread and GCD worker threads are reused, so callers MUST restore the previous
+    // value once done.
+
+    /// Disables materialization of dataless files on the current thread and returns the
+    /// previous policy value, so it can be handed back to `restoreDatalessMaterialization`.
+    static func disableDatalessMaterialization() -> Int32 {
+        let previous = getiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_THREAD)
+        setiopolicy_np(
+            IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES,
+            IOPOL_SCOPE_THREAD,
+            IOPOL_MATERIALIZE_DATALESS_FILES_OFF
+        )
+        return previous
+    }
+
+    /// Restores a previously captured dataless-materialization policy on the current thread.
+    static func restoreDatalessMaterialization(_ previous: Int32) {
+        setiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_THREAD, previous)
+    }
+
     // MARK: - Worker pool
 
     private func workerLoop() {
+        // Disable cloud-eviction materialization for this worker thread so `open(2)` on a
+        // dataless (evicted) directory fails fast with EDEADLK instead of blocking on a
+        // fileproviderd download. GCD threads outlive the scan and get reused, so restore.
+        let previousDatalessPolicy = Self.disableDatalessMaterialization()
+        defer { Self.restoreDatalessMaterialization(previousDatalessPolicy) }
+
         let buffer = UnsafeMutableRawPointer.allocate(byteCount: Self.bufferSize, alignment: 8)
         defer { buffer.deallocate() }
 
@@ -150,6 +184,8 @@ final class ScanCoordinator: @unchecked Sendable {
 
         let fd = open(job.path, O_RDONLY | O_DIRECTORY)
         if fd < 0 {
+            // Cloud-evicted (dataless) directories fail here with EDEADLK (materialization is
+            // disabled per worker thread) and intentionally land in this unreadable branch.
             job.node.isUnreadable = true
             return []
         }

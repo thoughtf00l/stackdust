@@ -144,6 +144,58 @@ final class DiskScannerTests: XCTestCase {
         }
     }
 
+    // MARK: - Dataless-materialization policy
+
+    /// Collects thread-local iopolicy readings taken on a dedicated worker thread. A reference
+    /// type so it can be shared with the probe thread without capturing mutable locals.
+    private final class PolicyProbeResult: @unchecked Sendable {
+        var original: Int32 = -1
+        var returnedPrevious: Int32 = -1
+        var afterDisable: Int32 = -1
+        var afterRestore: Int32 = -1
+    }
+
+    func testDisableAndRestoreDatalessMaterializationOnThread() throws {
+        let result = PolicyProbeResult()
+        let done = DispatchSemaphore(value: 0)
+
+        // Run on a dedicated thread so the test runner's own thread policy stays untouched.
+        let thread = Thread {
+            result.original =
+                getiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_THREAD)
+            result.returnedPrevious = ScanCoordinator.disableDatalessMaterialization()
+            result.afterDisable =
+                getiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_THREAD)
+            ScanCoordinator.restoreDatalessMaterialization(result.returnedPrevious)
+            result.afterRestore =
+                getiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_THREAD)
+            done.signal()
+        }
+        thread.start()
+        XCTAssertEqual(done.wait(timeout: .now() + 5), .success, "policy probe thread must finish")
+
+        XCTAssertEqual(result.returnedPrevious, result.original,
+                       "disable must return the pre-existing policy value")
+        XCTAssertEqual(result.afterDisable, IOPOL_MATERIALIZE_DATALESS_FILES_OFF,
+                       "materialization must be OFF after disabling on the thread")
+        XCTAssertEqual(result.afterRestore, result.original,
+                       "restore must return the policy to its original value")
+    }
+
+    func testScanSucceedsWithDatalessPolicyActive() async throws {
+        // A normal tree still scans correctly while workerLoop sets and defer-restores the
+        // per-thread dataless-materialization policy.
+        try writeFile(root.appendingPathComponent("a.bin"), bytes: 12_000)
+        let sub = try makeDirectory(root.appendingPathComponent("sub"))
+        try writeFile(sub.appendingPathComponent("b.bin"), bytes: 6_000)
+
+        let tree = try await runScanToCompletion(at: root)
+
+        XCTAssertGreaterThan(tree.allocatedSize, 0)
+        XCTAssertEqual(tree.allocatedSize, try referenceAllocatedSize(of: root),
+                       "scan total must match the reference walk with the policy active")
+    }
+
     // MARK: - Scan driver
 
     private func runScanToCompletion(at url: URL) async throws -> FileNode {
