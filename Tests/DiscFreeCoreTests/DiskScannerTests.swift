@@ -196,6 +196,287 @@ final class DiskScannerTests: XCTestCase {
                        "scan total must match the reference walk with the policy active")
     }
 
+    // MARK: - Partial snapshots
+
+    func testPartialSnapshotCopySemanticsAndCaps() throws {
+        // A fixture that is wide (to trip topChildren), deep (to trip maxDepth), and large enough
+        // (to trip nodeBudget). File sizes are spaced well over one block apart so their allocated
+        // sizes are distinct and their descending order is unambiguous.
+        try writeFile(root.appendingPathComponent("top.bin"), bytes: 10_000)
+
+        let wide = try makeDirectory(root.appendingPathComponent("wide"))
+        for i in 1...5 {
+            try writeFile(wide.appendingPathComponent("big_\(i).bin"), bytes: i * 100_000)
+        }
+
+        let deep = try makeDirectory(root.appendingPathComponent("deep"))
+        let d1 = try makeDirectory(deep.appendingPathComponent("d1"))
+        let d2 = try makeDirectory(d1.appendingPathComponent("d2"))
+        let d3 = try makeDirectory(d2.appendingPathComponent("d3"))
+        try writeFile(d3.appendingPathComponent("leaf.bin"), bytes: 50_000)
+
+        // Run a coordinator to completion, then snapshot the finished tree. This is the easiest
+        // deterministic path and still exercises every copy semantic: the aggregated sizes are
+        // authoritative, so the assertions below have exact expected values.
+        let coordinator = try ScanCoordinator(root: root, workerCount: 4)
+        let tree = try coordinator.run()
+
+        // Full-fidelity copy: distinct instances, parent links, exact sizes, descending order.
+        let full = coordinator.partialSnapshot(
+            focusPath: [], maxDepth: 20, topChildren: 100, nodeBudget: 100_000
+        )
+        XCTAssertEqual(full.name, tree.name)
+        XCTAssertEqual(full.allocatedSize, tree.allocatedSize, "root size must equal aggregated truth")
+        XCTAssertFalse(full === tree, "snapshot root must be a distinct instance")
+
+        let origWide = try XCTUnwrap(child(named: "wide", of: tree))
+        let copyWide = try XCTUnwrap(child(named: "wide", of: full))
+        XCTAssertFalse(copyWide === origWide, "copied nodes must be distinct instances from originals")
+        XCTAssertEqual(copyWide.allocatedSize, origWide.allocatedSize)
+        assertWellFormedCopy(full, expectedParent: nil)
+
+        // topChildren cap: the 5-wide directory keeps only its 3 largest, sorted descending.
+        let capped = coordinator.partialSnapshot(
+            focusPath: [], maxDepth: 5, topChildren: 3, nodeBudget: 100_000
+        )
+        let cappedWide = try XCTUnwrap(child(named: "wide", of: capped))
+        let cappedNames = cappedWide.children?.map(\.name) ?? []
+        XCTAssertEqual(cappedNames, ["big_5.bin", "big_4.bin", "big_3.bin"],
+                       "topChildren must keep the largest children in descending order")
+
+        // maxDepth cap: at depth 2 the directory is copied but not descended into.
+        let shallow = coordinator.partialSnapshot(
+            focusPath: [], maxDepth: 2, topChildren: 100, nodeBudget: 100_000
+        )
+        let shallowDeep = try XCTUnwrap(child(named: "deep", of: shallow))
+        let shallowD1 = try XCTUnwrap(child(named: "d1", of: shallowDeep))
+        XCTAssertNotNil(shallowD1.children, "a directory copy keeps a (possibly empty) children array")
+        XCTAssertEqual(shallowD1.children?.count, 0, "a directory at maxDepth must have no copied children")
+
+        // nodeBudget cap: the copy stops after exactly `budget` nodes.
+        let budgeted = coordinator.partialSnapshot(
+            focusPath: [], maxDepth: 20, topChildren: 100, nodeBudget: 4
+        )
+        XCTAssertEqual(countNodes(budgeted), 4, "nodeBudget must cap the total number of copied nodes")
+    }
+
+    func testPartialSnapshotDuringLiveScanIsMonotonicAndWellFormed() throws {
+        // A few thousand small files/dirs so the scan runs long enough to observe live snapshots.
+        for i in 0..<30 {
+            let dir = try makeDirectory(root.appendingPathComponent("d\(i)"))
+            for j in 0..<40 {
+                try writeFile(dir.appendingPathComponent("f\(j).bin"), bytes: 1024 + j * 16)
+            }
+            let nested = try makeDirectory(dir.appendingPathComponent("nested"))
+            for k in 0..<10 {
+                try writeFile(nested.appendingPathComponent("n\(k).bin"), bytes: 2048)
+            }
+        }
+
+        let coordinator = try ScanCoordinator(
+            root: root, workerCount: ProcessInfo.processInfo.activeProcessorCount
+        )
+        let outcome = ScanRunOutcome()
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            do { outcome.tree = try coordinator.run() } catch { outcome.error = error }
+            done.signal()
+        }
+
+        let rootPath = root.standardizedFileURL.path
+        var previousRootSize: Int64 = -1
+        var snapshotCount = 0
+        // Poll for completion, taking a snapshot each turn while the scan runs concurrently.
+        while done.wait(timeout: .now()) == .timedOut {
+            let snap = coordinator.partialSnapshot(
+                focusPath: [], maxDepth: 5, topChildren: 32, nodeBudget: 4000
+            )
+            snapshotCount += 1
+            XCTAssertEqual(snap.name, rootPath, "snapshot root name must match the scan root")
+            assertAllSizesNonNegative(snap)
+            XCTAssertGreaterThanOrEqual(snap.allocatedSize, previousRootSize,
+                                        "root partial size must be monotonically non-decreasing")
+            previousRootSize = snap.allocatedSize
+        }
+
+        if let error = outcome.error { throw error }
+        XCTAssertGreaterThan(snapshotCount, 0, "at least one snapshot must be taken during the live scan")
+        let tree = try XCTUnwrap(outcome.tree)
+        XCTAssertEqual(tree.allocatedSize, try referenceAllocatedSize(of: root),
+                       "final scan total must match the reference walk")
+    }
+
+    func testStreamPartialsAreWellFormedAndPrecedeFinished() async throws {
+        try writeFile(root.appendingPathComponent("a.bin"), bytes: 40_000)
+        let sub = try makeDirectory(root.appendingPathComponent("sub"))
+        try writeFile(sub.appendingPathComponent("b.bin"), bytes: 20_000)
+        let deep = try makeDirectory(sub.appendingPathComponent("deep"))
+        try writeFile(deep.appendingPathComponent("c.bin"), bytes: 60_000)
+
+        let scanner = DiskScanner()
+        let rootPath = root.standardizedFileURL.path
+        var finishedTree: FileNode?
+        var finishedCount = 0
+
+        // A tiny partial interval maximizes the chance of observing partials; the test does not
+        // require any (a fast machine may finish first), only that any received are well-formed
+        // and precede the single terminal `.finished`.
+        for try await update in scanner.scan(at: root, partialInterval: .milliseconds(1)) {
+            switch update {
+            case .started:
+                break
+            case .progress:
+                break
+            case .partial(let snapshot):
+                XCTAssertNil(finishedTree, "a .partial must never arrive after .finished")
+                XCTAssertEqual(snapshot.name, rootPath, "partial root name must match the scan root")
+                assertAllSizesNonNegative(snapshot)
+            case .finished(let tree):
+                finishedCount += 1
+                finishedTree = tree
+            }
+        }
+
+        XCTAssertEqual(finishedCount, 1, "the stream must end with exactly one .finished")
+        let tree = try XCTUnwrap(finishedTree)
+        XCTAssertEqual(tree.allocatedSize, try referenceAllocatedSize(of: root),
+                       "finished total must match the reference walk")
+    }
+
+    func testPartialSnapshotFollowsFocusPath() throws {
+        // A fixture where, at every level along the focus path, the chain child is deliberately the
+        // SMALLER sibling, so a topChildren of 1 would drop it were the chain not force-included.
+        // Below the focus the tree is deeper than maxDepth, to prove depth restarts at the focus.
+        // Sizes are spaced far apart so block rounding cannot reorder the aggregated totals.
+        try writeFile(root.appendingPathComponent("big0.bin"), bytes: 900_000)
+        let chain = try makeDirectory(root.appendingPathComponent("chain"))
+        try writeFile(chain.appendingPathComponent("big1.bin"), bytes: 300_000)
+        let mid = try makeDirectory(chain.appendingPathComponent("mid"))
+        try writeFile(mid.appendingPathComponent("big2.bin"), bytes: 100_000)
+        let leaf = try makeDirectory(mid.appendingPathComponent("leaf"))
+        let l1 = try makeDirectory(leaf.appendingPathComponent("L1"))
+        let l2 = try makeDirectory(l1.appendingPathComponent("L2"))
+        let l3 = try makeDirectory(l2.appendingPathComponent("L3"))
+        try writeFile(l3.appendingPathComponent("deep.bin"), bytes: 10_000)
+
+        let coordinator = try ScanCoordinator(root: root, workerCount: 4)
+        _ = try coordinator.run()
+        let rootPath = root.standardizedFileURL.path
+
+        // Focus three levels deep, topChildren = 1 so only the single largest sibling plus a
+        // force-included chain child can survive at each chain level.
+        let focusPath = ["chain", "mid", "leaf"]
+        let snap = coordinator.partialSnapshot(
+            focusPath: focusPath, maxDepth: 3, topChildren: 1, nodeBudget: 100_000
+        )
+
+        // (a) full chain with correct names and parent links, internally well-formed.
+        assertWellFormedCopy(snap, expectedParent: nil)
+        XCTAssertEqual(snap.name, rootPath, "snapshot root name must match the scan root")
+        let snapChain = try XCTUnwrap(child(named: "chain", of: snap))
+        XCTAssertTrue(snapChain.parent === snap, "chain's parent must be the snapshot root")
+        let snapMid = try XCTUnwrap(child(named: "mid", of: snapChain))
+        XCTAssertTrue(snapMid.parent === snapChain, "mid's parent must be the copied chain node")
+        let snapLeaf = try XCTUnwrap(child(named: "leaf", of: snapMid))
+        XCTAssertTrue(snapLeaf.parent === snapMid, "leaf's parent must be the copied mid node")
+
+        // (b) at every chain level the smaller chain child is present alongside the one largest
+        // sibling, even though topChildren is 1.
+        XCTAssertEqual(Set(snap.children?.map(\.name) ?? []), ["big0.bin", "chain"],
+                       "root keeps its largest sibling plus the force-included chain child")
+        XCTAssertEqual(Set(snapChain.children?.map(\.name) ?? []), ["big1.bin", "mid"])
+        XCTAssertEqual(Set(snapMid.children?.map(\.name) ?? []), ["big2.bin", "leaf"])
+        XCTAssertGreaterThan(
+            child(named: "big0.bin", of: snap)?.allocatedSize ?? 0, snapChain.allocatedSize,
+            "the chain child must be the smaller sibling, so topChildren=1 would drop it"
+        )
+
+        // (c) below the focus, descendants are copied maxDepth (3) levels deep. Because the chain
+        // above does NOT consume depth, the focus — itself 3 levels down — still expands fully.
+        let snapL1 = try XCTUnwrap(child(named: "L1", of: snapLeaf))
+        let snapL2 = try XCTUnwrap(child(named: "L2", of: snapL1))
+        let snapL3 = try XCTUnwrap(child(named: "L3", of: snapL2))
+        XCTAssertEqual(snapL3.children?.count, 0,
+                       "the node at maxDepth below the focus must be copied without its children")
+        XCTAssertNil(child(named: "deep.bin", of: snapL3),
+                     "content one level past maxDepth must not be copied")
+
+        // (d) an unresolvable tail falls back to the deepest existing ancestor (mid), which becomes
+        // the focus and gets its descendants copied with depth measured from itself.
+        let fallback = coordinator.partialSnapshot(
+            focusPath: ["chain", "mid", "nonexistent"],
+            maxDepth: 2, topChildren: 100, nodeBudget: 100_000
+        )
+        let fbChain = try XCTUnwrap(child(named: "chain", of: fallback))
+        let fbMid = try XCTUnwrap(child(named: "mid", of: fbChain))
+        XCTAssertNil(child(named: "nonexistent", of: fbMid), "the missing component must not appear")
+        XCTAssertEqual(Set(fbMid.children?.map(\.name) ?? []), ["big2.bin", "leaf"],
+                       "the fallback focus expands its own children")
+        let fbLeaf = try XCTUnwrap(child(named: "leaf", of: fbMid))
+        XCTAssertNotNil(child(named: "L1", of: fbLeaf), "depth is measured from the fallback focus")
+
+        // (e) with a tiny nodeBudget the full chain is still present (siblings may be dropped).
+        let budgeted = coordinator.partialSnapshot(
+            focusPath: focusPath, maxDepth: 3, topChildren: 32, nodeBudget: 1
+        )
+        let bChain = try XCTUnwrap(child(named: "chain", of: budgeted))
+        let bMid = try XCTUnwrap(child(named: "mid", of: bChain))
+        XCTAssertNotNil(child(named: "leaf", of: bMid),
+                        "the resolved chain must survive even a budget of 1")
+    }
+
+    func testStreamBeginsWithLiveScanAndFinishesOnce() async throws {
+        try writeFile(root.appendingPathComponent("a.bin"), bytes: 40_000)
+        let sub = try makeDirectory(root.appendingPathComponent("sub"))
+        try writeFile(sub.appendingPathComponent("b.bin"), bytes: 20_000)
+        let deep = try makeDirectory(sub.appendingPathComponent("deep"))
+        try writeFile(deep.appendingPathComponent("c.bin"), bytes: 60_000)
+
+        let scanner = DiskScanner()
+        var isFirstUpdate = true
+        var firstWasStarted = false
+        var liveScan: LiveScan?
+        var finishedCount = 0
+        var finishedTree: FileNode?
+
+        // A tiny partial interval maximizes concurrent snapshot activity while the focus is set.
+        for try await update in scanner.scan(at: root, partialInterval: .milliseconds(1)) {
+            if isFirstUpdate {
+                isFirstUpdate = false
+                if case .started(let handle) = update {
+                    firstWasStarted = true
+                    liveScan = handle
+                    // Steer the focus mid-scan; the emitter reads it concurrently and must not crash.
+                    handle.focusPath = ["sub"]
+                }
+            }
+            switch update {
+            case .started:
+                break
+            case .progress:
+                break
+            case .partial:
+                break
+            case .finished(let tree):
+                finishedCount += 1
+                finishedTree = tree
+            }
+        }
+
+        XCTAssertTrue(firstWasStarted, "the first stream update must be .started")
+        XCTAssertNotNil(liveScan, "the .started update must carry a LiveScan handle")
+        XCTAssertEqual(finishedCount, 1, "the stream must end with exactly one .finished")
+        let tree = try XCTUnwrap(finishedTree)
+        XCTAssertEqual(tree.allocatedSize, try referenceAllocatedSize(of: root),
+                       "finished total must match the reference walk")
+    }
+
+    /// Captures the outcome of a `ScanCoordinator.run()` executed on a background thread.
+    private final class ScanRunOutcome: @unchecked Sendable {
+        var tree: FileNode?
+        var error: Error?
+    }
+
     // MARK: - Scan driver
 
     private func runScanToCompletion(at url: URL) async throws -> FileNode {
@@ -261,6 +542,39 @@ final class DiskScannerTests: XCTestCase {
     private func allLeafNodes(_ node: FileNode) -> [FileNode] {
         guard let children = node.children else { return [node] }
         return children.flatMap { $0.children == nil ? [$0] : allLeafNodes($0) }
+    }
+
+    private func countNodes(_ node: FileNode) -> Int {
+        1 + (node.children?.reduce(0) { $0 + countNodes($1) } ?? 0)
+    }
+
+    /// Asserts a partial-snapshot subtree is internally consistent: every node's `parent` points
+    /// at its copied parent and each directory's children are sorted by size, descending.
+    private func assertWellFormedCopy(
+        _ node: FileNode, expectedParent: FileNode?,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertTrue(node.parent === expectedParent, "parent link must point within the copy",
+                      file: file, line: line)
+        guard let children = node.children else { return }
+        if children.count > 1 {
+            for index in 1..<children.count {
+                XCTAssertGreaterThanOrEqual(
+                    children[index - 1].allocatedSize, children[index].allocatedSize,
+                    "children must be sorted by size, descending", file: file, line: line
+                )
+            }
+        }
+        for child in children {
+            assertWellFormedCopy(child, expectedParent: node, file: file, line: line)
+        }
+    }
+
+    private func assertAllSizesNonNegative(
+        _ node: FileNode, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertGreaterThanOrEqual(node.allocatedSize, 0, file: file, line: line)
+        node.children?.forEach { assertAllSizesNonNegative($0, file: file, line: line) }
     }
 
     // MARK: - Fixture builders

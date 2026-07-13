@@ -4,11 +4,13 @@ import Synchronization
 
 /// Drives a parallel, single-volume disk scan and builds the `FileNode` tree.
 ///
-/// A fixed pool of workers shares a LIFO stack of directories still to enumerate. Each
-/// worker opens a directory, enumerates it with `getattrlistbulk(2)`, appends child nodes
-/// to that directory, and pushes any subdirectories back onto the stack. Termination is
-/// detected when every worker is simultaneously idle with an empty stack. Directory sizes
-/// are summed in a post-order pass after enumeration completes.
+/// A fixed pool of workers shares a FIFO queue of directories still to enumerate (an array
+/// consumed from a head index), so the tree is walked breadth-first and shallow levels
+/// stabilize first. Each worker opens a directory, enumerates it with `getattrlistbulk(2)`,
+/// publishes its child nodes to that directory, and pushes any subdirectories back onto the
+/// queue. Termination is detected when every worker is simultaneously idle with no queued
+/// jobs. Directory sizes grow as live partial sums during the scan and are recomputed exactly
+/// by a post-order pass after enumeration completes.
 final class ScanCoordinator: @unchecked Sendable {
     private struct Job {
         let node: FileNode
@@ -24,11 +26,20 @@ final class ScanCoordinator: @unchecked Sendable {
     private let rootDevice: dev_t
     private let root: FileNode
 
-    /// Guards `stack`, `idleWorkers`, and `isFinished`.
+    /// Guards `stack`, `stackHead`, `idleWorkers`, and `isFinished`.
     private let condition = NSCondition()
+    /// Jobs are appended to the end and consumed from `stackHead` (FIFO / breadth-first); the
+    /// consumed prefix is compacted away once it exceeds half the array to keep this O(1).
     private var stack: [Job] = []
+    private var stackHead = 0
     private var idleWorkers = 0
     private var isFinished = false
+
+    /// Guards every read/write of a *published* node's `children`, the bubbling of directory
+    /// `allocatedSize` up the parent chain, `isUnreadable` on already-published nodes, and the
+    /// final aggregation. `partialSnapshot` reads the live tree under this same lock. Taken once
+    /// per directory (at publication), never per file entry, to keep the hot path lean.
+    private let treeLock = Mutex<Void>(())
 
     /// Read on the hot path without taking `condition`; set by `cancel()`.
     private let cancelled = Atomic<Bool>(false)
@@ -94,7 +105,9 @@ final class ScanCoordinator: @unchecked Sendable {
             throw CancellationError()
         }
 
-        aggregate(root)
+        // Serialize against any in-flight `partialSnapshot` reader: aggregation overwrites the
+        // live partial sizes, and workers are done, so this is uncontended except for snapshots.
+        treeLock.withLock { _ in _ = aggregate(root) }
         return root
     }
 
@@ -145,7 +158,14 @@ final class ScanCoordinator: @unchecked Sendable {
                 return
             }
 
-            if let job = stack.popLast() {
+            if stackHead < stack.count {
+                let job = stack[stackHead]
+                stackHead += 1
+                // Compact the consumed prefix once it exceeds half the array (amortized O(1)).
+                if stackHead > stack.count / 2 {
+                    stack.removeFirst(stackHead)
+                    stackHead = 0
+                }
                 condition.unlock()
                 let subdirectories = process(job, buffer: buffer)
                 condition.lock()
@@ -159,13 +179,13 @@ final class ScanCoordinator: @unchecked Sendable {
             // No work available right now.
             idleWorkers += 1
             if idleWorkers == workerCount {
-                // Every worker is idle and the stack is empty: the scan is done.
+                // Every worker is idle and the queue is empty: the scan is done.
                 isFinished = true
                 condition.broadcast()
                 condition.unlock()
                 return
             }
-            while stack.isEmpty && !isFinished && !cancelled.load(ordering: .relaxed) {
+            while stackHead >= stack.count && !isFinished && !cancelled.load(ordering: .relaxed) {
                 condition.wait()
             }
             idleWorkers -= 1
@@ -186,13 +206,18 @@ final class ScanCoordinator: @unchecked Sendable {
         if fd < 0 {
             // Cloud-evicted (dataless) directories fail here with EDEADLK (materialization is
             // disabled per worker thread) and intentionally land in this unreadable branch.
-            job.node.isUnreadable = true
+            // The node is already published in its parent's children, so guard the write.
+            treeLock.withLock { _ in job.node.isUnreadable = true }
             return []
         }
         defer { close(fd) }
 
         var attrList = BulkDirectoryReader.makeAttrList()
         var subdirectories: [Job] = []
+        // Children accumulate locally and are published with one assignment under the tree lock
+        // when enumeration of this directory completes, so snapshot readers never see a partially
+        // filled array.
+        var localChildren: [FileNode] = []
         var items = 0
         var bytes: Int64 = 0
 
@@ -210,12 +235,13 @@ final class ScanCoordinator: @unchecked Sendable {
 
                 items += 1
 
-                // Per-entry error: keep a flagged placeholder and move on.
+                // Per-entry error: keep a flagged placeholder and move on. Safe to mutate before
+                // publication (this node is not yet visible to snapshot readers).
                 if entry.error != 0 {
                     if entry.hasName {
                         let node = FileNode(name: entry.name, isDirectory: false, parent: job.node)
                         node.isUnreadable = true
-                        job.node.children?.append(node)
+                        localChildren.append(node)
                     }
                     continue
                 }
@@ -228,7 +254,7 @@ final class ScanCoordinator: @unchecked Sendable {
                 switch entry.objType {
                 case UInt32(VDIR.rawValue):
                     let node = FileNode(name: entry.name, isDirectory: true, parent: job.node)
-                    job.node.children?.append(node)
+                    localChildren.append(node)
                     subdirectories.append(
                         Job(node: node, path: Self.appending(entry.name, to: job.path))
                     )
@@ -239,7 +265,7 @@ final class ScanCoordinator: @unchecked Sendable {
                     let node = FileNode(
                         name: entry.name, isDirectory: false, allocatedSize: size, parent: job.node
                     )
-                    job.node.children?.append(node)
+                    localChildren.append(node)
                     bytes += size
 
                 default:
@@ -254,8 +280,22 @@ final class ScanCoordinator: @unchecked Sendable {
                     let node = FileNode(
                         name: entry.name, isDirectory: false, allocatedSize: size, parent: job.node
                     )
-                    job.node.children?.append(node)
+                    localChildren.append(node)
                     bytes += size
+                }
+            }
+        }
+
+        // Publish children with a single assignment and bubble this directory's direct-file bytes
+        // up the parent chain to the root, both under the tree lock. The bubble gives every
+        // ancestor a monotonically growing partial size as more directories complete.
+        treeLock.withLock { _ in
+            job.node.children = localChildren
+            if bytes > 0 {
+                var node: FileNode? = job.node
+                while let current = node {
+                    current.allocatedSize += bytes
+                    node = current.parent
                 }
             }
         }
@@ -265,9 +305,162 @@ final class ScanCoordinator: @unchecked Sendable {
         return subdirectories
     }
 
+    // MARK: - Partial snapshots
+
+    /// Returns a detached copy of the in-progress tree, following the UI's current focus.
+    ///
+    /// Resolves `focusPath` from the root by matching child names level by level, stopping at the
+    /// deepest node that still exists (same fallback as `TreePath.resolve`: a component may be
+    /// missing because that area is not yet scanned or a partial cap hid it — the deepest resolved
+    /// node becomes the effective focus). The chain from the root down to that effective focus is
+    /// always copied in full: at each chain level the node's `topChildren` largest children are
+    /// copied too, always including the chain child so the chain never dangles. From the effective
+    /// focus, descendants are copied largest-first, `maxDepth` levels below the focus, `topChildren`
+    /// per directory; the chain above the focus does NOT count against `maxDepth`. Every copied node
+    /// counts against `nodeBudget`, but the resolved chain is copied even when the budget is
+    /// exhausted, so a snapshot never lacks its focus chain.
+    ///
+    /// `focusPath: []` reduces to a root-anchored snapshot. Every copy is a fresh `FileNode` with
+    /// `parent` links wired within the copy; `allocatedSize` carries the current partial lower bound
+    /// and `isUnreadable` is preserved (dev-classification fields are left at their defaults). Never
+    /// reads `FileNode.path` (an O(depth) rebuild).
+    func partialSnapshot(
+        focusPath: [String], maxDepth: Int, topChildren: Int, nodeBudget: Int
+    ) -> FileNode {
+        treeLock.withLock { _ in
+            var budget = nodeBudget
+            return copyFocusChain(
+                root, parent: nil, focusPath: focusPath[...],
+                maxDepth: maxDepth, topChildren: topChildren, budget: &budget
+            )
+        }
+    }
+
+    /// Copies `node` and continues toward the focus. If `focusPath` still names an existing child,
+    /// `node` is an ancestor on the chain: it is copied along with its `topChildren` largest
+    /// children (always including that chain child, so the chain never dangles), and only the chain
+    /// child recurses with the remaining path; the other selected siblings are copied shallowly.
+    /// Otherwise the path is exhausted or the next component is missing, so `node` is the effective
+    /// focus and its descendants are copied via `copySubtree` (depth 0). The chain is copied even
+    /// when `budget` is exhausted; only the shallow non-chain siblings are dropped once the budget
+    /// runs out. Must be called with `treeLock` held.
+    private func copyFocusChain(
+        _ node: FileNode,
+        parent: FileNode?,
+        focusPath: ArraySlice<String>,
+        maxDepth: Int,
+        topChildren: Int,
+        budget: inout Int
+    ) -> FileNode {
+        guard let name = focusPath.first,
+              let children = node.children,
+              let chainChild = children.first(where: { $0.name == name })
+        else {
+            return copySubtree(
+                node, parent: parent, depth: 0,
+                maxDepth: maxDepth, topChildren: topChildren, budget: &budget
+            )
+        }
+
+        let copy = FileNode(
+            name: node.name,
+            isDirectory: node.isDirectory,
+            allocatedSize: node.allocatedSize,
+            parent: parent
+        )
+        copy.isUnreadable = node.isUnreadable
+        budget -= 1
+
+        // Largest-first, capped at `topChildren`, with the chain child forced in even if it did
+        // not make the cut, then re-sorted so the selection stays in descending-size order.
+        var selected = children.sorted { $0.allocatedSize > $1.allocatedSize }
+        if selected.count > topChildren { selected = Array(selected.prefix(topChildren)) }
+        if !selected.contains(where: { $0 === chainChild }) {
+            selected.append(chainChild)
+            selected.sort { $0.allocatedSize > $1.allocatedSize }
+        }
+
+        let remaining = focusPath.dropFirst()
+        var copiedChildren: [FileNode] = []
+        for child in selected {
+            if child === chainChild {
+                // Always recurse the chain, regardless of the remaining budget.
+                copiedChildren.append(
+                    copyFocusChain(
+                        child, parent: copy, focusPath: remaining,
+                        maxDepth: maxDepth, topChildren: topChildren, budget: &budget
+                    )
+                )
+            } else {
+                if budget <= 0 { continue }
+                copiedChildren.append(copyShallow(child, parent: copy, budget: &budget))
+            }
+        }
+        copy.children = copiedChildren
+        return copy
+    }
+
+    /// Copies a single node without its descendants; a directory keeps an empty `children` array,
+    /// matching how `copySubtree` leaves a directory copied at `maxDepth`. Used for the non-chain
+    /// siblings alongside the focus chain. Must be called with `treeLock` held.
+    private func copyShallow(_ node: FileNode, parent: FileNode?, budget: inout Int) -> FileNode {
+        let copy = FileNode(
+            name: node.name,
+            isDirectory: node.isDirectory,
+            allocatedSize: node.allocatedSize,
+            parent: parent
+        )
+        copy.isUnreadable = node.isUnreadable
+        budget -= 1
+        return copy
+    }
+
+    /// Copies `node` and — if it is a directory below `maxDepth` — its largest-first children,
+    /// decrementing `budget` per copied node. Must be called with `treeLock` held.
+    private func copySubtree(
+        _ node: FileNode,
+        parent: FileNode?,
+        depth: Int,
+        maxDepth: Int,
+        topChildren: Int,
+        budget: inout Int
+    ) -> FileNode {
+        let copy = FileNode(
+            name: node.name,
+            isDirectory: node.isDirectory,
+            allocatedSize: node.allocatedSize,
+            parent: parent
+        )
+        copy.isUnreadable = node.isUnreadable
+        budget -= 1
+
+        guard node.isDirectory, depth < maxDepth,
+              let children = node.children, !children.isEmpty
+        else { return copy }
+
+        // Largest-first, capped at `topChildren`.
+        let ordered = children.sorted { $0.allocatedSize > $1.allocatedSize }
+        let selected = ordered.count > topChildren ? Array(ordered.prefix(topChildren)) : ordered
+
+        var copiedChildren: [FileNode] = []
+        for child in selected {
+            if budget <= 0 { break }
+            copiedChildren.append(
+                copySubtree(
+                    child, parent: copy, depth: depth + 1,
+                    maxDepth: maxDepth, topChildren: topChildren, budget: &budget
+                )
+            )
+        }
+        copy.children = copiedChildren
+        return copy
+    }
+
     // MARK: - Aggregation
 
-    /// Post-order sum: a directory's size is the total of its descendants (files only).
+    /// Post-order sum: a directory's size is the total of its descendants (files only). This runs
+    /// after all workers finish and overwrites the live partial sums accumulated during the scan
+    /// with exact totals; it is authoritative.
     @discardableResult
     private func aggregate(_ node: FileNode) -> Int64 {
         guard let children = node.children else { return node.allocatedSize }

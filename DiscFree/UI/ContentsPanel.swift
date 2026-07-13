@@ -6,6 +6,9 @@ struct ContentsPanel: View {
     let focusTotal: Int64
     let rows: [ContentsPanelRow]
     let mode: DisplayMode
+    /// While a foreground scan is still running the tree is mutating and sizes are lower bounds,
+    /// so the Move-to-Trash affordance is hidden (the model guards it too).
+    let scanActive: Bool
     @Binding var hovered: FileNode?
     let onDrill: (FileNode) -> Void
     let onReveal: (FileNode) -> Void
@@ -34,8 +37,9 @@ struct ContentsPanel: View {
                         Label("Reveal in Finder", systemImage: "magnifyingglass")
                     }
                     // In .devOnly a container that merely holds dev items must not offer Trash:
-                    // trashing it would delete the non-dev content the mode hides.
-                    if mode != .devOnly || row.isDev {
+                    // trashing it would delete the non-dev content the mode hides. And never
+                    // while a scan is still running (sizes are lower bounds, tree is mutating).
+                    if !scanActive && (mode != .devOnly || row.isDev) {
                         Button(role: .destructive) {
                             onTrash(row.node)
                         } label: {

@@ -11,12 +11,16 @@ import Foundation
 /// populated only by an optional `DevClassifier` pass after a scan; a tree that is never
 /// classified leaves them at their defaults.
 ///
-/// Thread-safety: during a scan each node is mutated only by the single worker that
-/// enumerated its parent directory (which appends this node) or, for directories, by the
-/// single worker that enumerates this node (which fills `children`/`isUnreadable`).
-/// Ownership is handed between workers through a lock that establishes happens-before,
-/// and the final size aggregation runs after all workers have finished. Hence the
-/// `@unchecked Sendable` conformance: there is no concurrent mutation of the same node.
+/// Thread-safety: during a scan the coordinator publishes a directory's `children` exactly
+/// once, with a single assignment made under its tree lock when enumeration of that directory
+/// finishes; the same lock guards bubbling each directory's direct-file bytes up the `parent`
+/// chain into every ancestor's `allocatedSize` (giving directories monotonically growing partial
+/// sums), and setting `isUnreadable` on a node already visible to snapshot readers. Any reader
+/// that walks a live tree — the partial-snapshot copy — takes the same lock, which establishes
+/// happens-before for the published `children`/sizes. The final size aggregation runs after all
+/// workers have finished, under the same lock. A node's own `name`/`isDirectory` are immutable,
+/// and a leaf's `allocatedSize` is set at init before the node is published. Hence the
+/// `@unchecked Sendable` conformance: there is no unsynchronized concurrent access to a node.
 public final class FileNode: @unchecked Sendable {
     /// For the root node this holds the absolute path of the scan root (e.g. "/Applications"
     /// or "/"); for every other node it is just the entry's own name. `path` relies on this.

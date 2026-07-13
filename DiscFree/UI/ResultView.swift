@@ -34,6 +34,13 @@ struct ResultView: View {
                     dataDate: model.lastScanDate
                 )
                 Divider()
+            } else if model.scanActive {
+                ScanningBar(
+                    itemsScanned: model.progress.itemsScanned,
+                    bytesAccumulated: model.progress.bytesAccumulated,
+                    onCancel: { model.returnToStart() }
+                )
+                Divider()
             }
 
             if let focus = model.focus {
@@ -57,6 +64,7 @@ struct ResultView: View {
                             focusTotal: model.focusDisplayTotal,
                             rows: model.rows,
                             mode: model.displayMode,
+                            scanActive: model.scanActive,
                             hovered: $hovered,
                             onDrill: { model.drill(into: $0) },
                             onReveal: { model.reveal($0) },
@@ -175,6 +183,37 @@ private struct RefreshBar: View {
             text += " · data from \(dataDate.formatted(date: .omitted, time: .shortened))"
         }
         return text
+    }
+}
+
+/// The thin strip shown while a foreground scan is still running under the browser: an
+/// indeterminate progress bar plus a live item/byte count and a compact Cancel that abandons the
+/// scan and returns to the picker. Mirrors `RefreshBar`'s layout; the two never show at once
+/// (background refresh only runs for cache-loaded trees, `scanActive` only for foreground scans).
+private struct ScanningBar: View {
+    let itemsScanned: Int
+    let bytesAccumulated: Int64
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .progressViewStyle(.linear)
+            Text(caption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
+            Button("Cancel", action: onCancel)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+    }
+
+    private var caption: String {
+        "Scanning… \(itemsScanned.formatted()) items · \(byteString(bytesAccumulated))"
     }
 }
 

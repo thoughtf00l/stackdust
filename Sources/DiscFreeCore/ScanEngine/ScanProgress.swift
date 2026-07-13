@@ -18,10 +18,19 @@ public struct ScanProgress: Sendable, Equatable {
 
 /// An update emitted by `DiskScanner.scan(at:)`.
 ///
-/// The stream emits `.progress` repeatedly (throttled) and exactly one terminal
-/// `.finished` carrying the fully built, size-aggregated tree, after which it finishes.
+/// The stream emits `.started` first (exactly once), then `.progress` repeatedly (throttled),
+/// `.partial` repeatedly (throttled), and exactly one terminal `.finished` carrying the fully
+/// built, size-aggregated tree, after which it finishes.
 public enum ScanUpdate: Sendable {
+    /// Emitted exactly once, before any other update: hands the consumer the `LiveScan` handle
+    /// that steers the partial snapshots. The consumer writes its current focus path into the
+    /// handle and each subsequent `.partial` follows that focus.
+    case started(LiveScan)
     case progress(ScanProgress)
+    /// A throttled, detached copy of the top of the in-progress tree; its `allocatedSize` values
+    /// are partial lower bounds (they only grow) and the node identities are NOT those of the
+    /// final tree carried by `.finished`.
+    case partial(FileNode)
     case finished(FileNode)
 }
 

@@ -26,6 +26,13 @@ final class AppModel {
     }
 
     private(set) var phase: Phase = .idle
+
+    /// True from `startScan` until the scan finishes, fails, or is cancelled. Drives everything
+    /// scan-specific in the result view (the scanning strip, the trash lock). Distinct from
+    /// `phase`: `.scanning` is only the sub-second window before the first partial arrives; the
+    /// UI switches to `.result` and browses the growing tree while `scanActive` stays true.
+    private(set) var scanActive: Bool = false
+
     private(set) var progress = ScanProgress(itemsScanned: 0, bytesAccumulated: 0, currentPath: "")
     private(set) var root: FileNode?
     private(set) var segments: [SunburstSegment] = []
@@ -80,6 +87,10 @@ final class AppModel {
     private let snapshotStore = SnapshotStore()
     private var scanTask: Task<Void, Never>?
     private var layoutTask: Task<Void, Never>?
+    /// Focus-steering handle for the running foreground scan. Non-nil between `.started` and the
+    /// scan's end; the UI writes the current focus path here (via `setFocus`) so each partial
+    /// snapshot follows where the user has navigated.
+    private var liveScan: LiveScan?
     private var unreadableTask: Task<Void, Never>?
     private var classifyTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
@@ -140,6 +151,8 @@ final class AppModel {
         cancelRefresh()
         classifyTask?.cancel()
         phase = .scanning
+        scanActive = true
+        liveScan = nil
         progress = ScanProgress(itemsScanned: 0, bytesAccumulated: 0, currentPath: url.path)
         root = nil
         focus = nil
@@ -155,21 +168,25 @@ final class AppModel {
             do {
                 for try await update in self.scanner.scan(at: url) {
                     switch update {
+                    case .started(let handle):
+                        self.liveScan = handle
                     case .progress(let progress):
                         self.progress = progress
+                    case .partial(let snapshot):
+                        self.adoptPartialTree(snapshot)
                     case .finished(let tree):
-                        self.root = tree
-                        self.setFocus(tree)
-                        self.phase = .result
-                        self.lastScanDate = Date()
-                        self.recountUnreadable(in: tree)
-                        self.classify(tree)
-                        self.saveSnapshot(of: tree)
+                        self.scanActive = false
+                        self.liveScan = nil
+                        self.adoptFinishedTree(tree)
                     }
                 }
             } catch is CancellationError {
+                self.scanActive = false
+                self.liveScan = nil
                 self.phase = .idle
             } catch {
+                self.scanActive = false
+                self.liveScan = nil
                 self.phase = .failed(error.localizedDescription)
             }
         }
@@ -187,6 +204,8 @@ final class AppModel {
         layoutTask = nil
         classifyTask?.cancel()
         classifyTask = nil
+        scanActive = false
+        liveScan = nil
         lastScanDate = nil
         phase = .idle
         root = nil
@@ -221,6 +240,9 @@ final class AppModel {
 
     private func setFocus(_ node: FileNode) {
         focus = node
+        // Steer the running scan's partial snapshots to follow the user's focus. No-op when no
+        // scan is live (`liveScan` nil for cache-loaded/background-refreshed trees).
+        liveScan?.focusPath = TreePath.components(of: node)
         rebuild(for: node)
     }
 
@@ -242,6 +264,34 @@ final class AppModel {
             self?.rows = result.rows
             self?.focusDisplayTotal = result.total
         }
+    }
+
+    /// Adopts a live partial `snapshot` as the on-screen tree so the user can browse the scan
+    /// as it grows. Mirrors `adoptRefreshedTree`'s focus-by-path restoration but skips the
+    /// finish work (classification, unreadable recount, snapshot save, `lastScanDate`): partial
+    /// sizes are growing lower bounds and carry no dev classification. On the first partial it
+    /// flips `phase` to `.result`, replacing the transient scanning screen with the browser.
+    private func adoptPartialTree(_ snapshot: FileNode) {
+        let focusComponents = focus.map { TreePath.components(of: $0) } ?? []
+        root = snapshot
+        setFocus(TreePath.resolve(focusComponents, in: snapshot))
+        if phase != .result {
+            phase = .result
+        }
+    }
+
+    /// Adopts the final, fully aggregated tree from `.finished`, restoring the focus by path so a
+    /// user who navigated during the scan is not yanked back to the root. Runs the finish work
+    /// partials skip.
+    private func adoptFinishedTree(_ tree: FileNode) {
+        let focusComponents = focus.map { TreePath.components(of: $0) } ?? []
+        root = tree
+        setFocus(TreePath.resolve(focusComponents, in: tree))
+        phase = .result
+        lastScanDate = Date()
+        recountUnreadable(in: tree)
+        classify(tree)
+        saveSnapshot(of: tree)
     }
 
     /// Classifies the tree against the dev-item catalog off the main thread, then rebuilds if
@@ -276,8 +326,12 @@ final class AppModel {
             do {
                 for try await update in self.scanner.scan(at: url) {
                     switch update {
+                    case .started:
+                        break  // Stage 5 wires the focus handle here.
                     case .progress(let progress):
                         self.refreshProgress = progress
+                    case .partial:
+                        break  // Stage 3 will render live partial snapshots here.
                     case .finished(let tree):
                         self.adoptRefreshedTree(tree)
                     }
@@ -332,6 +386,9 @@ final class AppModel {
     }
 
     func requestTrash(_ node: FileNode) {
+        // Partial-scan sizes are lower bounds and the tree is still mutating; acting on it
+        // invites deleting the wrong thing. The UI also hides the affordance (see ContentsPanel).
+        guard !scanActive else { return }
         pendingTrash = node
     }
 

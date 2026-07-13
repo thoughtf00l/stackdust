@@ -19,8 +19,12 @@ enum ScanRunner {
         do {
             for try await update in scanner.scan(at: url) {
                 switch update {
+                case .started:
+                    break  // The CLI never navigates, so it does not steer partial snapshots.
                 case .progress(let snapshot):
                     progress.report(snapshot)
+                case .partial:
+                    break  // The CLI has no live view; it uses only the final tree.
                 case .finished(let root):
                     tree = root
                 }
