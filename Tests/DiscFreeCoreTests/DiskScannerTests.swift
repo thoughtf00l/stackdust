@@ -323,6 +323,99 @@ final class DiskScannerTests: XCTestCase {
         XCTAssertEqual(countNodes(budgeted), 4, "nodeBudget must cap the total number of copied nodes")
     }
 
+    func testPartialSnapshotSpendsBudgetBreadthFirst() throws {
+        // The focus (root) has six child directories; one (c0) dominates in both size and node
+        // count. A depth-first budget would descend into that dominant child and bury the whole
+        // budget in its subtree, dropping the other five top-level sectors. Breadth-first must copy
+        // all six children before spending anything on level 2.
+        let childCount = 6
+        for c in 0..<childCount {
+            let dir = try makeDirectory(root.appendingPathComponent("c\(c)"))
+            if c == 0 {
+                // The dominant child: eight large grandchildren — more than the budget left after
+                // the root and all six children, so a depth-first copy would exhaust the budget here.
+                for g in 0..<8 {
+                    try writeFile(dir.appendingPathComponent("g\(g).bin"), bytes: 360_000 + g * 20_000)
+                }
+            } else {
+                // Smaller children with a few grandchildren each; each total stays well below c0.
+                for g in 0..<3 {
+                    try writeFile(dir.appendingPathComponent("g\(g).bin"), bytes: (childCount - c) * 20_000)
+                }
+            }
+        }
+
+        let coordinator = try ScanCoordinator(root: root, workerCount: 4)
+        _ = try coordinator.run()
+
+        // Budget = root (1) + all six children (6) + three grandchildren (3).
+        let budget = 1 + childCount + 3
+        let snap = coordinator.partialSnapshot(
+            focusPath: [], maxDepth: 5, topChildren: 32, nodeBudget: budget
+        )
+
+        // All six top-level sectors survive, even though c0 dominates (old depth-first order kept
+        // only c0 and its first children).
+        XCTAssertEqual(Set(snap.children?.map(\.name) ?? []),
+                       Set((0..<childCount).map { "c\($0)" }),
+                       "breadth-first must copy every top-level child before descending")
+        // The budget is spent exactly, not left partly unused.
+        XCTAssertEqual(countNodes(snap), budget, "the copy must contain exactly nodeBudget nodes")
+        // The three level-2 nodes all belong to the dominant child (processed first); the other
+        // five children have no copied grandchildren yet.
+        let c0 = try XCTUnwrap(child(named: "c0", of: snap))
+        XCTAssertEqual(c0.children?.count, 3, "leftover budget goes to the largest child first")
+        for c in 1..<childCount {
+            let node = try XCTUnwrap(child(named: "c\(c)", of: snap))
+            XCTAssertEqual(node.children?.count, 0,
+                           "no budget remains for smaller children's grandchildren")
+        }
+        assertWellFormedCopy(snap, expectedParent: nil)
+    }
+
+    func testPartialSnapshotLevelCompletenessCutsOffCleanly() throws {
+        // Three levels below the focus. A budget that runs out partway through level 2 must leave
+        // level 1 fully populated and produce no level-3 node at all: a level-3 node can only be
+        // created by expanding a level-2 node, which never happens once the budget is spent.
+        let level1Count = 4
+        let level2PerChild = 5
+        for a in 0..<level1Count {
+            let child = try makeDirectory(root.appendingPathComponent("a\(a)"))
+            for b in 0..<level2PerChild {
+                let grand = try makeDirectory(child.appendingPathComponent("b\(b)"))
+                // Two great-grandchildren (level 3) to prove none are copied. The (level1Count - a)
+                // factor makes a0 the largest child and keeps every child's total distinct.
+                for c in 0..<2 {
+                    try writeFile(grand.appendingPathComponent("c\(c).bin"),
+                                  bytes: (level1Count - a) * 100_000 + b * 10_000 + 10_000)
+                }
+            }
+        }
+
+        let coordinator = try ScanCoordinator(root: root, workerCount: 4)
+        _ = try coordinator.run()
+
+        // Budget = root (1) + all four level-1 children (4) + three level-2 nodes (3): cuts off
+        // partway through level 2 (there are 20 level-2 nodes in total).
+        let budget = 1 + level1Count + 3
+        let snap = coordinator.partialSnapshot(
+            focusPath: [], maxDepth: 8, topChildren: 32, nodeBudget: budget
+        )
+
+        // Level 1 is complete.
+        XCTAssertEqual(snap.children?.count, level1Count, "level 1 must be copied in full")
+
+        // Exactly three level-2 nodes were copied, and every one of them is childless — no level-3
+        // node exists anywhere in the copy.
+        let level2Nodes = (snap.children ?? []).flatMap { $0.children ?? [] }
+        XCTAssertEqual(level2Nodes.count, 3, "the budget must cut off partway through level 2")
+        for node in level2Nodes {
+            XCTAssertEqual(node.children?.count, 0, "no level-3 node may be present")
+        }
+        XCTAssertEqual(countNodes(snap), budget, "the copy must contain exactly nodeBudget nodes")
+        assertWellFormedCopy(snap, expectedParent: nil)
+    }
+
     func testPartialSnapshotDuringLiveScanIsMonotonicAndWellFormed() throws {
         // A few thousand small files/dirs so the scan runs long enough to observe live snapshots.
         for i in 0..<30 {

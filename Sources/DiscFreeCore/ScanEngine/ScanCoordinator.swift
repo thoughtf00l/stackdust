@@ -358,8 +358,10 @@ final class ScanCoordinator: @unchecked Sendable {
     /// copied too, always including the chain child so the chain never dangles. From the effective
     /// focus, descendants are copied largest-first, `maxDepth` levels below the focus, `topChildren`
     /// per directory; the chain above the focus does NOT count against `maxDepth`. Every copied node
-    /// counts against `nodeBudget`, but the resolved chain is copied even when the budget is
-    /// exhausted, so a snapshot never lacks its focus chain.
+    /// counts against `nodeBudget`, which is spent breadth-first — each level below the focus is
+    /// copied in full before any deeper level begins — so a wide focus never loses whole sectors to a
+    /// single dominant child's subtree; the resolved chain, however, is copied even when the budget
+    /// is exhausted, so a snapshot never lacks its focus chain.
     ///
     /// `focusPath: []` reduces to a root-anchored snapshot. Every copy is a fresh `FileNode` with
     /// `parent` links wired within the copy; `allocatedSize` carries the current partial lower bound
@@ -456,8 +458,15 @@ final class ScanCoordinator: @unchecked Sendable {
         return copy
     }
 
-    /// Copies `node` and — if it is a directory below `maxDepth` — its largest-first children,
-    /// decrementing `budget` per copied node. Must be called with `treeLock` held.
+    /// Copies `node` (the effective focus) and its descendants breadth-first, down to `maxDepth`
+    /// levels below it. It copies the focus, then all of the focus's selected children, then all of
+    /// their children, and so on, charging `budget` for every copied node and stopping as soon as
+    /// `budget` is exhausted. Spending the budget level by level guarantees each shallow ring is
+    /// complete before any deeper ring starts, so a wide focus never has whole sectors buried inside
+    /// one dominant child's subtree. Per directory the children are sorted by `allocatedSize`
+    /// descending and capped at `topChildren`; a directory whose children were not copied — because
+    /// the budget ran out or it sits at `maxDepth` — keeps an empty `children` array (a leaf keeps
+    /// `nil`). Must be called with `treeLock` held.
     private func copySubtree(
         _ node: FileNode,
         parent: FileNode?,
@@ -466,35 +475,51 @@ final class ScanCoordinator: @unchecked Sendable {
         topChildren: Int,
         budget: inout Int
     ) -> FileNode {
-        let copy = FileNode(
+        let focus = FileNode(
             name: node.name,
             isDirectory: node.isDirectory,
             allocatedSize: node.allocatedSize,
             parent: parent
         )
-        copy.isUnreadable = node.isUnreadable
+        focus.isUnreadable = node.isUnreadable
         budget -= 1
 
-        guard node.isDirectory, depth < maxDepth,
-              let children = node.children, !children.isEmpty
-        else { return copy }
+        // Breadth-first frontier of directories still to expand, drained in FIFO order so an entire
+        // level is copied before the next one begins. Each entry pairs an original directory with
+        // its fresh copy and the copy's depth below the focus; only directories are enqueued.
+        var frontier: [(original: FileNode, copy: FileNode, depth: Int)] = [(node, focus, depth)]
+        var head = 0
+        while head < frontier.count {
+            let entry = frontier[head]
+            head += 1
 
-        // Largest-first, capped at `topChildren`.
-        let ordered = children.sorted { $0.allocatedSize > $1.allocatedSize }
-        let selected = ordered.count > topChildren ? Array(ordered.prefix(topChildren)) : ordered
+            guard entry.original.isDirectory, entry.depth < maxDepth,
+                  let children = entry.original.children, !children.isEmpty
+            else { continue }
 
-        var copiedChildren: [FileNode] = []
-        for child in selected {
-            if budget <= 0 { break }
-            copiedChildren.append(
-                copySubtree(
-                    child, parent: copy, depth: depth + 1,
-                    maxDepth: maxDepth, topChildren: topChildren, budget: &budget
+            // Largest-first, capped at `topChildren`.
+            let ordered = children.sorted { $0.allocatedSize > $1.allocatedSize }
+            let selected = ordered.count > topChildren ? Array(ordered.prefix(topChildren)) : ordered
+
+            var copiedChildren: [FileNode] = []
+            for child in selected {
+                if budget <= 0 { break }
+                let childCopy = FileNode(
+                    name: child.name,
+                    isDirectory: child.isDirectory,
+                    allocatedSize: child.allocatedSize,
+                    parent: entry.copy
                 )
-            )
+                childCopy.isUnreadable = child.isUnreadable
+                budget -= 1
+                copiedChildren.append(childCopy)
+                if child.isDirectory {
+                    frontier.append((child, childCopy, entry.depth + 1))
+                }
+            }
+            entry.copy.children = copiedChildren
         }
-        copy.children = copiedChildren
-        return copy
+        return focus
     }
 
     // MARK: - Aggregation
