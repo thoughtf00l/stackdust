@@ -101,6 +101,23 @@ struct ReclaimView: View {
             List {
                 ForEach(model.reclaimGroups, id: \.category) { group in
                     Section {
+                        // The category's consequence explanation lives here — the first, non-interactive
+                        // row of the section content — rather than in the header. macOS List section
+                        // headers are height-constrained and clip multi-line text; a content row is not,
+                        // so the caption wraps to as many lines as it needs. The invisible checkbox-width
+                        // spacer keeps it aligned with the item label column below.
+                        HStack(spacing: 8) {
+                            Image(systemName: "square")
+                                .font(.body)
+                                .opacity(0)
+                                .accessibilityHidden(true)
+                            Text(group.category.consequence)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
                         let expanded = expandedCategories.contains(group.category)
                         let visible = expanded ? group.items : Array(group.items.prefix(collapsedItemLimit))
                         ForEach(visible, id: \.node.id) { item in
@@ -216,29 +233,25 @@ private struct ReclaimCheckbox: View {
     }
 }
 
-/// One group's section header: a tri-state checkbox that selects/deselects the whole group, the
-/// category name, its risk badge and total, and the category's consequence as a caption below.
+/// One group's section header: a single-line control row — a tri-state checkbox that
+/// selects/deselects the whole group, the category name, its risk badge, and its total. The
+/// category's consequence caption is rendered as the section's first content row instead, since a
+/// height-constrained macOS List header clips multi-line text.
 private struct ReclaimGroupHeader: View {
     let group: ReclaimGroup
     let state: ReclaimCheckbox.State
     let onToggle: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 8) {
-                ReclaimCheckbox(state: state, action: onToggle)
-                Text(group.category.displayName)
-                    .font(.headline)
-                RiskBadge(category: group.category)
-                Spacer(minLength: 8)
-                Text(byteString(group.totalBytes))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-            Text(group.category.consequence)
-                .font(.caption)
+        HStack(spacing: 8) {
+            ReclaimCheckbox(state: state, action: onToggle)
+            Text(group.category.displayName)
+                .font(.headline)
+            RiskBadge(category: group.category)
+            Spacer(minLength: 8)
+            Text(byteString(group.totalBytes))
+                .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 4)
     }
