@@ -232,7 +232,9 @@ enum SunburstLayout {
                 hue: hue,
                 saturation: saturation,
                 brightness: brightness,
-                isUnreadable: node.isUnreadable,
+                // Evicted (iCloud) directories render exactly like unreadable ones — gray, no new
+                // color. They are 0-byte so they are almost always minAngle-culled anyway.
+                isUnreadable: node.isUnreadable || node.isCloudEvicted,
                 isDev: isDev,
                 // Highlighting off: full color, so the fraction is forced to 1.
                 reclaimableFraction: highlight ? fraction : 1

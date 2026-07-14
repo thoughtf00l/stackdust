@@ -169,6 +169,24 @@ final class ScanCoordinator: @unchecked Sendable {
         setiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_THREAD, previous)
     }
 
+    /// Why a directory could not be enumerated, derived from the `errno` `open(2)` set.
+    enum UnreadableReason: Equatable {
+        /// A genuine read failure (permission denied, SIP, I/O error, ...).
+        case unreadable
+        /// The directory is dataless (its content is evicted to iCloud). With materialization
+        /// disabled on the worker thread `open(2)` fails fast with `EDEADLK` instead of blocking
+        /// on a fileproviderd download; the directory holds no local disk space.
+        case cloudEvicted
+    }
+
+    /// Maps the `errno` from a failed `open(2)` of a directory to why it could not be read.
+    /// `EDEADLK` is the kernel's signal that opening would have to materialize a dataless
+    /// (iCloud-evicted) directory, which the per-thread policy above forbids; every other error
+    /// is a real read failure. Pure so it can be unit-tested without fabricating a dataless dir.
+    static func unreadableReason(forOpenErrno openErrno: Int32) -> UnreadableReason {
+        openErrno == EDEADLK ? .cloudEvicted : .unreadable
+    }
+
     // MARK: - Worker pool
 
     private func workerLoop() {
@@ -234,10 +252,17 @@ final class ScanCoordinator: @unchecked Sendable {
 
         let fd = open(job.path, O_RDONLY | O_DIRECTORY)
         if fd < 0 {
-            // Cloud-evicted (dataless) directories fail here with EDEADLK (materialization is
-            // disabled per worker thread) and intentionally land in this unreadable branch.
-            // The node is already published in its parent's children, so guard the write.
-            treeLock.withLock { _ in job.node.isUnreadable = true }
+            // Capture errno before anything else can clobber it, then classify the failure:
+            // cloud-evicted (dataless) directories fail here with EDEADLK (materialization is
+            // disabled per worker thread), everything else is a genuine read failure. The node is
+            // already published in its parent's children, so guard the write.
+            let reason = Self.unreadableReason(forOpenErrno: errno)
+            treeLock.withLock { _ in
+                switch reason {
+                case .cloudEvicted: job.node.isCloudEvicted = true
+                case .unreadable: job.node.isUnreadable = true
+                }
+            }
             return []
         }
         defer { close(fd) }
@@ -365,7 +390,8 @@ final class ScanCoordinator: @unchecked Sendable {
     ///
     /// `focusPath: []` reduces to a root-anchored snapshot. Every copy is a fresh `FileNode` with
     /// `parent` links wired within the copy; `allocatedSize` carries the current partial lower bound
-    /// and `isUnreadable` is preserved (dev-classification fields are left at their defaults). Never
+    /// and `isUnreadable`/`isCloudEvicted` are preserved (dev-classification fields are left at
+    /// their defaults). Never
     /// reads `FileNode.path` (an O(depth) rebuild).
     func partialSnapshot(
         focusPath: [String], maxDepth: Int, topChildren: Int, nodeBudget: Int
@@ -412,6 +438,7 @@ final class ScanCoordinator: @unchecked Sendable {
             parent: parent
         )
         copy.isUnreadable = node.isUnreadable
+        copy.isCloudEvicted = node.isCloudEvicted
         budget -= 1
 
         // Largest-first, capped at `topChildren`, with the chain child forced in even if it did
@@ -454,6 +481,7 @@ final class ScanCoordinator: @unchecked Sendable {
             parent: parent
         )
         copy.isUnreadable = node.isUnreadable
+        copy.isCloudEvicted = node.isCloudEvicted
         budget -= 1
         return copy
     }
@@ -482,6 +510,7 @@ final class ScanCoordinator: @unchecked Sendable {
             parent: parent
         )
         focus.isUnreadable = node.isUnreadable
+        focus.isCloudEvicted = node.isCloudEvicted
         budget -= 1
 
         // Breadth-first frontier of directories still to expand, drained in FIFO order so an entire
@@ -511,6 +540,7 @@ final class ScanCoordinator: @unchecked Sendable {
                     parent: entry.copy
                 )
                 childCopy.isUnreadable = child.isUnreadable
+                childCopy.isCloudEvicted = child.isCloudEvicted
                 budget -= 1
                 copiedChildren.append(childCopy)
                 if child.isDirectory {

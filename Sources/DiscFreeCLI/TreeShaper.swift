@@ -37,11 +37,12 @@ enum TreeShaper {
         truncated: inout Bool
     ) -> TreeNodeDTO {
         let unreadable: Bool? = node.isUnreadable ? true : nil
+        let cloudEvicted: Bool? = node.isCloudEvicted ? true : nil
 
         guard node.isDirectory else {
             return TreeNodeDTO(
                 name: node.name, bytes: node.allocatedSize, dir: false,
-                unreadable: unreadable, children: nil
+                unreadable: unreadable, cloud_evicted: cloudEvicted, children: nil
             )
         }
 
@@ -53,7 +54,7 @@ enum TreeShaper {
             if !allChildren.isEmpty { truncated = true }
             return TreeNodeDTO(
                 name: node.name, bytes: node.allocatedSize, dir: true,
-                unreadable: unreadable, children: []
+                unreadable: unreadable, cloud_evicted: cloudEvicted, children: []
             )
         }
 
@@ -81,17 +82,31 @@ enum TreeShaper {
         }
         return TreeNodeDTO(
             name: node.name, bytes: node.allocatedSize, dir: true,
-            unreadable: unreadable, children: childNodes
+            unreadable: unreadable, cloud_evicted: cloudEvicted, children: childNodes
         )
     }
 
-    /// Counts nodes flagged unreadable across the whole tree, independent of any bounding, so
-    /// the reported `unreadable_count` reflects the real scan rather than the shaped view.
+    /// Counts nodes flagged unreadable (genuine read failures) across the whole tree, independent
+    /// of any bounding, so the reported `unreadable_count` reflects the real scan rather than the
+    /// shaped view. iCloud-evicted directories are not counted here (see `countCloudEvicted`).
     static func countUnreadable(_ root: FileNode) -> Int {
         var count = 0
         var stack: [FileNode] = [root]
         while let node = stack.popLast() {
             if node.isUnreadable { count += 1 }
+            if let children = node.children { stack.append(contentsOf: children) }
+        }
+        return count
+    }
+
+    /// Counts iCloud-evicted (dataless) directories across the whole tree, independent of any
+    /// bounding. These are directories the scanner deliberately did not descend into because
+    /// their content lives in the cloud and occupies ~no local disk space.
+    static func countCloudEvicted(_ root: FileNode) -> Int {
+        var count = 0
+        var stack: [FileNode] = [root]
+        while let node = stack.popLast() {
+            if node.isCloudEvicted { count += 1 }
             if let children = node.children { stack.append(contentsOf: children) }
         }
         return count

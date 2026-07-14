@@ -26,6 +26,7 @@ enum HumanTables {
         var label = indent + node.name
         if node.dir { label += "/" }
         if node.unreadable == true { label += "  (unreadable)" }
+        if node.cloud_evicted == true { label += "  (in iCloud)" }
         rows.append((ByteSize.human(node.bytes), label))
         for child in node.children ?? [] {
             collectRows(child, depth: depth + 1, into: &rows)

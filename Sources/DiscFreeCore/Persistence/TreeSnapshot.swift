@@ -23,18 +23,25 @@ public struct SnapshotHeader: Sendable, Equatable {
 ///
 /// Trees can hold millions of nodes, so the format is a compact hand-rolled stream rather
 /// than `Codable`: a fixed header, then the nodes depth-first — name (varint length + UTF-8),
-/// a flags byte (directory, unreadable), `allocatedSize` as a varint, and for directories a
-/// child count followed by the children. `devSize`/`devCategory` are deliberately not
-/// persisted: classification is a single cheap pass that must be re-run after loading anyway
-/// (the catalog rules may have changed between runs).
+/// a flags byte (directory, unreadable, cloud-evicted), `allocatedSize` as a varint, and for
+/// directories a child count followed by the children. `isUnreadable` and `isCloudEvicted` are
+/// mutually exclusive but stored as two independent bits (simpler and self-describing than a
+/// packed reason code, and there is a spare bit to spare). `devSize`/`devCategory` are
+/// deliberately not persisted: classification is a single cheap pass that must be re-run after
+/// loading anyway (the catalog rules may have changed between runs).
+///
+/// The version is bumped whenever the node encoding changes; a decoder rejects any version but
+/// its own (see `readHeader`), so an older cache fails to load and callers fall back to a fresh
+/// scan. Version 2 added the cloud-evicted flag bit.
 public enum TreeSnapshot {
 
     private static let magic: [UInt8] = Array("DFSN".utf8)
-    private static let version: UInt8 = 1
+    private static let version: UInt8 = 2
 
     private struct Flags {
         static let isDirectory: UInt8 = 1 << 0
         static let isUnreadable: UInt8 = 1 << 1
+        static let isCloudEvicted: UInt8 = 1 << 2
     }
 
     // MARK: - Encoding
@@ -60,6 +67,7 @@ public enum TreeSnapshot {
         var flags: UInt8 = 0
         if node.isDirectory { flags |= Flags.isDirectory }
         if node.isUnreadable { flags |= Flags.isUnreadable }
+        if node.isCloudEvicted { flags |= Flags.isCloudEvicted }
         out.append(flags)
 
         appendVarint(UInt64(node.allocatedSize), to: &out)
@@ -122,6 +130,7 @@ public enum TreeSnapshot {
             parent: parent
         )
         node.isUnreadable = flags & Flags.isUnreadable != 0
+        node.isCloudEvicted = flags & Flags.isCloudEvicted != 0
 
         if node.isDirectory {
             let count = try reader.readVarint()

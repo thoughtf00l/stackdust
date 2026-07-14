@@ -179,6 +179,59 @@ final class DiskScannerTests: XCTestCase {
         XCTAssertGreaterThan(tree.allocatedSize, 0)
     }
 
+    // MARK: - Errno → unreadable-reason mapping
+
+    func testUnreadableReasonMapsEdeadlkToCloudEvicted() {
+        // EDEADLK is the kernel's fail-fast signal for a dataless (iCloud-evicted) directory when
+        // materialization is disabled on the calling thread — the one errno that means "evicted".
+        XCTAssertEqual(ScanCoordinator.unreadableReason(forOpenErrno: EDEADLK), .cloudEvicted)
+
+        // Every other error is a genuine read failure. (Cannot fabricate a dataless dir in a
+        // fixture, hence this pure-function test of the classification instead.)
+        for code in [EACCES, EPERM, EIO, ENOENT, ENOTDIR, ELOOP, EINTR] {
+            XCTAssertEqual(ScanCoordinator.unreadableReason(forOpenErrno: code), .unreadable,
+                           "errno \(code) must map to a genuine read failure")
+        }
+    }
+
+    func testPartialSnapshotPropagatesUnreadableAndCloudEvictedFlags() throws {
+        // A focus chain (chain → mid → leaf) plus a non-chain sibling, so the snapshot exercises
+        // all three copy paths: copyFocusChain (chain ancestor), copySubtree (focus + descendants),
+        // and copyShallow (the non-chain sibling).
+        let chain = try makeDirectory(root.appendingPathComponent("chain"))
+        let mid = try makeDirectory(chain.appendingPathComponent("mid"))
+        try writeFile(mid.appendingPathComponent("leaf.bin"), bytes: 50_000)
+        let sib = try makeDirectory(root.appendingPathComponent("sib"))
+        try writeFile(sib.appendingPathComponent("s.bin"), bytes: 40_000)
+
+        let coordinator = try ScanCoordinator(root: root, workerCount: 4)
+        let tree = try coordinator.run()
+
+        // Flag two originals after the scan (the two flags are mutually exclusive per node in
+        // production; a copy must faithfully carry whichever is set).
+        let origChain = try XCTUnwrap(child(named: "chain", of: tree))
+        origChain.isUnreadable = true
+        let origSib = try XCTUnwrap(child(named: "sib", of: tree))
+        origSib.isCloudEvicted = true
+
+        // copySubtree path: a root-anchored full snapshot copies every descendant.
+        let full = coordinator.partialSnapshot(
+            focusPath: [], maxDepth: 20, topChildren: 100, nodeBudget: 100_000
+        )
+        XCTAssertTrue(try XCTUnwrap(child(named: "chain", of: full)).isUnreadable)
+        XCTAssertTrue(try XCTUnwrap(child(named: "sib", of: full)).isCloudEvicted)
+        XCTAssertFalse(try XCTUnwrap(child(named: "sib", of: full)).isUnreadable)
+
+        // copyFocusChain (chain ancestor) + copyShallow (non-chain sibling).
+        let focused = coordinator.partialSnapshot(
+            focusPath: ["chain", "mid"], maxDepth: 2, topChildren: 100, nodeBudget: 100_000
+        )
+        XCTAssertTrue(try XCTUnwrap(child(named: "chain", of: focused)).isUnreadable,
+                      "copyFocusChain must carry the flag on a chain ancestor")
+        XCTAssertTrue(try XCTUnwrap(child(named: "sib", of: focused)).isCloudEvicted,
+                      "copyShallow must carry the flag on a non-chain sibling")
+    }
+
     // MARK: - Cancellation stops the scan
 
     func testCancellationStopsScan() async throws {

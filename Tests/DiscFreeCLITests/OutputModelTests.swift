@@ -19,16 +19,31 @@ final class OutputModelTests: XCTestCase {
     // MARK: - Optional-field omission
 
     func testTreeNodeOmitsNilOptionals() throws {
-        let file = TreeNodeDTO(name: "a", bytes: 10, dir: false, unreadable: nil, children: nil)
+        let file = TreeNodeDTO(
+            name: "a", bytes: 10, dir: false, unreadable: nil, cloud_evicted: nil, children: nil
+        )
         let keys = try jsonObject(file).keys
-        XCTAssertEqual(Set(keys), ["name", "bytes", "dir"], "nil children/unreadable are omitted")
+        XCTAssertEqual(Set(keys), ["name", "bytes", "dir"],
+                       "nil children/unreadable/cloud_evicted are omitted")
     }
 
     func testTreeNodeIncludesPresentOptionals() throws {
-        let dir = TreeNodeDTO(name: "d", bytes: 0, dir: true, unreadable: true, children: [])
+        let dir = TreeNodeDTO(
+            name: "d", bytes: 0, dir: true, unreadable: true, cloud_evicted: nil, children: []
+        )
         let object = try jsonObject(dir)
         XCTAssertEqual(object["unreadable"] as? Bool, true)
+        XCTAssertFalse(object.keys.contains("cloud_evicted"), "nil cloud_evicted is omitted")
         XCTAssertNotNil(object["children"])
+    }
+
+    func testTreeNodeIncludesCloudEvictedWhenSet() throws {
+        let dir = TreeNodeDTO(
+            name: "d", bytes: 0, dir: true, unreadable: nil, cloud_evicted: true, children: []
+        )
+        let object = try jsonObject(dir)
+        XCTAssertEqual(object["cloud_evicted"] as? Bool, true)
+        XCTAssertFalse(object.keys.contains("unreadable"), "nil unreadable is omitted")
     }
 
     func testTrashedItemOmitsNilNote() throws {
@@ -72,14 +87,17 @@ final class OutputModelTests: XCTestCase {
 
     func testScanResultRoundTrips() throws {
         let tree = TreeNodeDTO(
-            name: "/root", bytes: 30, dir: true, unreadable: nil,
+            name: "/root", bytes: 30, dir: true, unreadable: nil, cloud_evicted: nil,
             children: [
-                TreeNodeDTO(name: "big", bytes: 20, dir: false, unreadable: nil, children: nil),
-                TreeNodeDTO(name: "sub", bytes: 10, dir: true, unreadable: nil, children: []),
+                TreeNodeDTO(name: "big", bytes: 20, dir: false, unreadable: nil,
+                            cloud_evicted: nil, children: nil),
+                TreeNodeDTO(name: "sub", bytes: 10, dir: true, unreadable: nil,
+                            cloud_evicted: true, children: []),
             ]
         )
         let result = ScanResultDTO(
-            path: "/root", total_bytes: 30, unreadable_count: 0, truncated: true, tree: tree
+            path: "/root", total_bytes: 30, unreadable_count: 0, cloud_evicted_count: 1,
+            truncated: true, tree: tree
         )
         XCTAssertEqual(try roundTrip(result), result)
     }
@@ -117,13 +135,16 @@ final class OutputModelTests: XCTestCase {
     // MARK: - Stable top-level schema shape
 
     func testScanResultTopLevelKeys() throws {
-        let tree = TreeNodeDTO(name: "/r", bytes: 0, dir: true, unreadable: nil, children: [])
+        let tree = TreeNodeDTO(
+            name: "/r", bytes: 0, dir: true, unreadable: nil, cloud_evicted: nil, children: []
+        )
         let result = ScanResultDTO(
-            path: "/r", total_bytes: 0, unreadable_count: 0, truncated: false, tree: tree
+            path: "/r", total_bytes: 0, unreadable_count: 0, cloud_evicted_count: 0,
+            truncated: false, tree: tree
         )
         XCTAssertEqual(
             Set(try jsonObject(result).keys),
-            ["path", "total_bytes", "unreadable_count", "truncated", "tree"]
+            ["path", "total_bytes", "unreadable_count", "cloud_evicted_count", "truncated", "tree"]
         )
     }
 

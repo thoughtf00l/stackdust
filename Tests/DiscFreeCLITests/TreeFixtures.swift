@@ -23,4 +23,11 @@ enum TreeFixtures {
         node.isUnreadable = true
         return node
     }
+
+    /// A directory whose content is evicted to iCloud (no children, flagged cloud-evicted).
+    static func cloudEvictedDir(_ name: String) -> FileNode {
+        let node = FileNode(name: name, isDirectory: true, parent: nil)
+        node.isCloudEvicted = true
+        return node
+    }
 }

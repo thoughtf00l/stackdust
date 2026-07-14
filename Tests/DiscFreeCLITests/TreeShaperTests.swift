@@ -86,14 +86,43 @@ final class TreeShaperTests: XCTestCase {
         let root = dir("/root", [TreeFixtures.unreadableDir("blocked")])
         let result = TreeShaper.shape(root, options: .init(maxDepth: 1, top: 100, minSize: 0))
         XCTAssertEqual(result.node.children?.first?.unreadable, true)
+        XCTAssertNil(result.node.children?.first?.cloud_evicted, "unreadable is not cloud-evicted")
     }
 
-    // MARK: - Unreadable count over the full tree
+    func testCloudEvictedFlagged() {
+        let root = dir("/root", [TreeFixtures.cloudEvictedDir("in-cloud")])
+        let result = TreeShaper.shape(root, options: .init(maxDepth: 1, top: 100, minSize: 0))
+        XCTAssertEqual(result.node.children?.first?.cloud_evicted, true)
+        XCTAssertNil(result.node.children?.first?.unreadable, "cloud-evicted is not unreadable")
+    }
+
+    func testReadableNodeCarriesNeitherFlag() {
+        let root = dir("/root", [file("a", 10)])
+        let result = TreeShaper.shape(root, options: .init(maxDepth: 1, top: 100, minSize: 0))
+        let leaf = result.node.children?.first
+        XCTAssertNil(leaf?.unreadable)
+        XCTAssertNil(leaf?.cloud_evicted)
+    }
+
+    // MARK: - Counts over the full tree, split by cause
 
     func testCountUnreadableSpansWholeTreeRegardlessOfBounding() {
         let deep = dir("deep", [TreeFixtures.unreadableDir("x"), TreeFixtures.unreadableDir("y")])
         let root = dir("/root", [deep, TreeFixtures.unreadableDir("z")])
         // Bounding to depth 0 must not affect the count: it walks the real tree.
         XCTAssertEqual(TreeShaper.countUnreadable(root), 3)
+    }
+
+    func testCountsSplitUnreadableFromCloudEvicted() {
+        // Two genuine failures and three evicted directories, mixed at different depths.
+        let deep = dir("deep", [TreeFixtures.unreadableDir("x"), TreeFixtures.cloudEvictedDir("c1")])
+        let root = dir("/root", [
+            deep,
+            TreeFixtures.unreadableDir("z"),
+            TreeFixtures.cloudEvictedDir("c2"),
+            TreeFixtures.cloudEvictedDir("c3"),
+        ])
+        XCTAssertEqual(TreeShaper.countUnreadable(root), 2, "evicted dirs must not count as unreadable")
+        XCTAssertEqual(TreeShaper.countCloudEvicted(root), 3)
     }
 }

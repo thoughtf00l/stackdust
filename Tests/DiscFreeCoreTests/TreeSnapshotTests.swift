@@ -17,15 +17,18 @@ final class TreeSnapshotTests: XCTestCase {
         return node
     }
 
-    /// A tree exercising the format's edge cases: unicode names, an unreadable directory,
-    /// a zero-size file (the hard-link convention), and an empty directory.
+    /// A tree exercising the format's edge cases: unicode names, an unreadable directory, an
+    /// iCloud-evicted directory, a zero-size file (the hard-link convention), and an empty directory.
     private func sampleTree() -> FileNode {
         let locked = dir("locked", [])
         locked.isUnreadable = true
+        let evicted = dir("evicted", [])
+        evicted.isCloudEvicted = true
         return dir("/scan root", [
             dir("Папка с пробелами", [file("файл ёё.dat", 31_457_280)]),
             dir("empty", []),
             locked,
+            evicted,
             file("hardlink-second-occurrence", 0),
             file("plain.bin", 1_234_567),
         ])
@@ -35,6 +38,7 @@ final class TreeSnapshotTests: XCTestCase {
         XCTAssertEqual(a.name, b.name, "name at \(path)")
         XCTAssertEqual(a.isDirectory, b.isDirectory, "isDirectory at \(path)/\(a.name)")
         XCTAssertEqual(a.isUnreadable, b.isUnreadable, "isUnreadable at \(path)/\(a.name)")
+        XCTAssertEqual(a.isCloudEvicted, b.isCloudEvicted, "isCloudEvicted at \(path)/\(a.name)")
         XCTAssertEqual(a.allocatedSize, b.allocatedSize, "allocatedSize at \(path)/\(a.name)")
         XCTAssertEqual(a.children?.count, b.children?.count, "child count at \(path)/\(a.name)")
         for (childA, childB) in zip(a.children ?? [], b.children ?? []) {
@@ -57,6 +61,25 @@ final class TreeSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.header.totalBytes, root.allocatedSize)
         assertEqualTrees(root, decoded.root)
         XCTAssertNil(decoded.root.parent)
+    }
+
+    func testRoundTripPreservesUnreadableAndCloudEvictedFlags() throws {
+        let decoded = try TreeSnapshot.decode(
+            TreeSnapshot.encode(sampleTree(), scanDate: Date(timeIntervalSince1970: 0))
+        ).root
+        let children = try XCTUnwrap(decoded.children)
+
+        let locked = try XCTUnwrap(children.first { $0.name == "locked" })
+        XCTAssertTrue(locked.isUnreadable)
+        XCTAssertFalse(locked.isCloudEvicted, "the two flags are mutually exclusive")
+
+        let evicted = try XCTUnwrap(children.first { $0.name == "evicted" })
+        XCTAssertTrue(evicted.isCloudEvicted)
+        XCTAssertFalse(evicted.isUnreadable, "the two flags are mutually exclusive")
+
+        let plain = try XCTUnwrap(children.first { $0.name == "plain.bin" })
+        XCTAssertFalse(plain.isUnreadable)
+        XCTAssertFalse(plain.isCloudEvicted)
     }
 
     func testDecodedTreeLeavesClassificationAtDefaults() throws {
@@ -93,6 +116,19 @@ final class TreeSnapshotTests: XCTestCase {
         data[4] = 99  // the version byte follows the 4-byte magic
         XCTAssertThrowsError(try TreeSnapshot.decode(data)) { error in
             XCTAssertEqual(error as? SnapshotError, .unsupportedVersion(99))
+        }
+    }
+
+    /// A snapshot from the previous format version (1, before the cloud-evicted flag) must be
+    /// rejected so the app degrades to a fresh scan rather than misreading old flag bytes.
+    func testOldVersionSnapshotRejected() {
+        var data = TreeSnapshot.encode(sampleTree(), scanDate: Date(timeIntervalSince1970: 0))
+        data[4] = 1  // downgrade the version byte to the pre-cloud-evicted format
+        XCTAssertThrowsError(try TreeSnapshot.decode(data)) { error in
+            XCTAssertEqual(error as? SnapshotError, .unsupportedVersion(1))
+        }
+        XCTAssertThrowsError(try TreeSnapshot.decodeHeader(data)) { error in
+            XCTAssertEqual(error as? SnapshotError, .unsupportedVersion(1))
         }
     }
 

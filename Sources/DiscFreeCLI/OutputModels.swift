@@ -5,21 +5,28 @@ import Foundation
 
 /// One node in a shaped scan tree.
 ///
-/// `unreadable` is present only when the directory could not be read. `children` is present
-/// for directories (possibly empty when pruned or not descended into) and absent for files.
+/// `unreadable` is present only when the directory could not be read (a genuine failure).
+/// `cloud_evicted` is present only when the directory's content is evicted to iCloud and was
+/// intentionally not downloaded; the two are mutually exclusive. `children` is present for
+/// directories (possibly empty when pruned or not descended into) and absent for files.
 struct TreeNodeDTO: Codable, Equatable {
     let name: String
     let bytes: Int64
     let dir: Bool
     let unreadable: Bool?
+    let cloud_evicted: Bool?
     let children: [TreeNodeDTO]?
 }
 
 /// The result of `discfree scan`.
+///
+/// `unreadable_count` counts only genuine read failures; iCloud-evicted directories are counted
+/// separately in `cloud_evicted_count` and are NOT included in `unreadable_count`.
 struct ScanResultDTO: Codable, Equatable {
     let path: String
     let total_bytes: Int64
     let unreadable_count: Int
+    let cloud_evicted_count: Int
     let truncated: Bool
     let tree: TreeNodeDTO
 }

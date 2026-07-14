@@ -97,6 +97,10 @@ struct ResultView: View {
                     )
                     .font(.callout)
                 }
+                if model.cloudEvictedCount > 0 {
+                    CloudEvictedIndicator(count: model.cloudEvictedCount)
+                        .font(.callout)
+                }
                 if let focus = model.focus {
                     Text("\(focus.displayName) — \(byteString(model.focusDisplayTotal))")
                         .foregroundStyle(.secondary)

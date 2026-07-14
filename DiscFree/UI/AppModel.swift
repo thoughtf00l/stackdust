@@ -83,9 +83,12 @@ final class AppModel {
 
     /// Whether the app can read protected locations; drives the Full Disk Access hint.
     private(set) var fullDiskAccess: FullDiskAccessStatus = .undetermined
-    /// Number of unreadable directories across the whole scanned tree. Computed off the main
-    /// thread once per scan and after each deletion — never walked per frame.
+    /// Number of unreadable directories (genuine read failures) across the whole scanned tree.
+    /// Computed off the main thread once per scan and after each deletion — never walked per frame.
     private(set) var unreadableCount: Int = 0
+    /// Number of iCloud-evicted (dataless) directories across the whole scanned tree, counted in
+    /// the same off-main-thread walk as `unreadableCount`. Excluded from `unreadableCount`.
+    private(set) var cloudEvictedCount: Int = 0
 
     /// Free space on the volume holding the scan root, including purgeable space (the figure
     /// Finder reports, via `volumeAvailableCapacityForImportantUsage`). Nil when unreadable.
@@ -199,6 +202,7 @@ final class AppModel {
         pendingTrash = nil
         errorMessage = nil
         unreadableCount = 0
+        cloudEvictedCount = 0
         reclaimGroups = []
         reclaimLabels = [:]
         reclaimSelection = []
@@ -261,6 +265,7 @@ final class AppModel {
         pendingTrash = nil
         errorMessage = nil
         unreadableCount = 0
+        cloudEvictedCount = 0
         reclaimGroups = []
         reclaimLabels = [:]
         reclaimSelection = []
@@ -762,25 +767,34 @@ final class AppModel {
         freeSpaceBytes = values?.volumeAvailableCapacityForImportantUsage
     }
 
-    /// Counts unreadable directories across the whole tree off the main thread.
+    /// Counts unreadable and iCloud-evicted directories across the whole tree in one off-main-thread
+    /// walk, publishing both figures.
     private func recountUnreadable(in tree: FileNode) {
         unreadableTask?.cancel()
         unreadableTask = Task { [weak self] in
-            let count = await Task.detached(priority: .utility) {
-                Self.unreadableNodeCount(tree)
+            let counts = await Task.detached(priority: .utility) {
+                Self.unreadableCounts(tree)
             }.value
             guard !Task.isCancelled else { return }
-            self?.unreadableCount = count
+            self?.unreadableCount = counts.unreadable
+            self?.cloudEvictedCount = counts.cloudEvicted
         }
     }
 
-    private nonisolated static func unreadableNodeCount(_ node: FileNode) -> Int {
-        var count = node.isUnreadable ? 1 : 0
-        if let children = node.children {
-            for child in children {
-                count += unreadableNodeCount(child)
-            }
+    /// Walks `root` once, tallying genuine read failures and iCloud-evicted directories
+    /// separately (the two flags are mutually exclusive per node). Iterative so a deep tree
+    /// cannot overflow the stack.
+    private nonisolated static func unreadableCounts(
+        _ root: FileNode
+    ) -> (unreadable: Int, cloudEvicted: Int) {
+        var unreadable = 0
+        var cloudEvicted = 0
+        var stack: [FileNode] = [root]
+        while let node = stack.popLast() {
+            if node.isUnreadable { unreadable += 1 }
+            if node.isCloudEvicted { cloudEvicted += 1 }
+            if let children = node.children { stack.append(contentsOf: children) }
         }
-        return count
+        return (unreadable, cloudEvicted)
     }
 }

@@ -48,6 +48,7 @@ extension DiscFree {
 
             let tree = try await ScanRunner.run(path: path)
             let unreadableCount = TreeShaper.countUnreadable(tree)
+            let cloudEvictedCount = TreeShaper.countCloudEvicted(tree)
             let shaped = TreeShaper.shape(
                 tree,
                 options: .init(maxDepth: depth, top: top, minSize: minBytes)
@@ -57,6 +58,7 @@ extension DiscFree {
                 path: tree.name,
                 total_bytes: tree.allocatedSize,
                 unreadable_count: unreadableCount,
+                cloud_evicted_count: cloudEvictedCount,
                 truncated: shaped.truncated,
                 tree: shaped.node
             )
@@ -67,6 +69,9 @@ extension DiscFree {
                 Output.line(HumanTables.tree(shaped.node))
                 if unreadableCount > 0 {
                     Output.note("note: \(unreadableCount) item(s) could not be read and count as 0 bytes.")
+                }
+                if cloudEvictedCount > 0 {
+                    Output.note("note: \(cloudEvictedCount) item(s) are evicted to iCloud, were not downloaded, and count as 0 bytes.")
                 }
             }
 

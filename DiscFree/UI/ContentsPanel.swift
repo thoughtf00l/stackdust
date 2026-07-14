@@ -75,9 +75,16 @@ private struct ContentsRow: View {
         focusTotal > 0 ? Double(row.displaySize) / Double(focusTotal) : 0
     }
 
+    /// Evicted (iCloud) directories render exactly like unreadable ones (gray swatch, lock glyph):
+    /// both hold no local bytes and were not descended into. Nil node ("Other" row) → false.
+    private var isUnreadableLike: Bool {
+        guard let node = row.node else { return false }
+        return node.isUnreadable || node.isCloudEvicted
+    }
+
     private var swatch: Color {
         if row.isOther { return Color(white: 0.6) }  // neutral gray, matching the "Other" wedge
-        if row.node?.isUnreadable == true { return Color(white: 0.55) }
+        if isUnreadableLike { return Color(white: 0.55) }
         // Same blend as the matching sunburst wedge: full color when highlighting is off
         // (fraction 1), desaturated toward gray by its reclaimable share when on.
         return SunburstSegment.tint(hue: hue, saturation: 0.7, brightness: 0.82,
@@ -87,7 +94,7 @@ private struct ContentsRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: iconName)
-                .foregroundStyle(row.node?.isUnreadable == true ? Color.secondary : swatch)
+                .foregroundStyle(isUnreadableLike ? Color.secondary : swatch)
                 .frame(width: 18)
 
             Text(row.name)
@@ -149,7 +156,7 @@ private struct ContentsRow: View {
     private var iconName: String {
         if row.isOther { return "ellipsis.circle" }
         guard let node = row.node else { return "doc.fill" }
-        if node.isUnreadable { return "lock.fill" }
+        if isUnreadableLike { return "lock.fill" }
         return node.isDirectory ? "folder.fill" : "doc.fill"
     }
 

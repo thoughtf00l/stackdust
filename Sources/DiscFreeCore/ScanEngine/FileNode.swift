@@ -15,7 +15,8 @@ import Foundation
 /// once, with a single assignment made under its tree lock when enumeration of that directory
 /// finishes; the same lock guards bubbling each directory's direct-file bytes up the `parent`
 /// chain into every ancestor's `allocatedSize` (giving directories monotonically growing partial
-/// sums), and setting `isUnreadable` on a node already visible to snapshot readers. Any reader
+/// sums), and setting `isUnreadable`/`isCloudEvicted` on a node already visible to snapshot
+/// readers. Any reader
 /// that walks a live tree — the partial-snapshot copy — takes the same lock, which establishes
 /// happens-before for the published `children`/sizes. The final size aggregation runs after all
 /// workers have finished, under the same lock. A node's own `name`/`isDirectory` are immutable,
@@ -39,7 +40,14 @@ public final class FileNode: @unchecked Sendable {
 
     /// Set when the directory could not be opened/read (e.g. permission denied), or for a
     /// directory entry the file system reported a per-entry error for. The scan continues.
+    /// Mutually exclusive with `isCloudEvicted`: a node carries at most one of the two.
     public internal(set) var isUnreadable: Bool
+
+    /// Set when a directory was skipped because its content is evicted to iCloud (dataless):
+    /// it occupies ~no local disk space and was intentionally not downloaded (opening it would
+    /// force fileproviderd to materialize the whole package). Mutually exclusive with
+    /// `isUnreadable`, which is reserved for genuine read failures.
+    public internal(set) var isCloudEvicted: Bool = false
 
     /// Bytes within this subtree attributable to developer-reclaimable items, filled in by a
     /// `DevClassifier` pass. Equals `allocatedSize` on a dev-item root; on a plain directory it

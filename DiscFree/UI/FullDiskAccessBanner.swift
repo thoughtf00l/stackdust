@@ -56,3 +56,15 @@ struct UnreadableIndicator: View {
         }
     }
 }
+
+/// "N in iCloud" chip for the result screen: directories whose content is evicted to iCloud,
+/// which DiscFree intentionally does not download (they hold almost no local disk space).
+struct CloudEvictedIndicator: View {
+    let count: Int
+
+    var body: some View {
+        Label("\(count) in iCloud", systemImage: "icloud")
+            .foregroundStyle(.secondary)
+            .help("Directories whose content is evicted to iCloud. DiscFree does not download them: they occupy almost no local disk space. Their sizes are not included.")
+    }
+}

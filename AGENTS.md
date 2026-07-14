@@ -71,14 +71,26 @@ Disk usage as a size-sorted tree. Defaults: `--depth 2`, `--top 20` children per
 directory. JSON shape:
 
 ```json
-{"path": "...", "total_bytes": 0, "unreadable_count": 0, "truncated": false,
- "tree": {"name": "...", "bytes": 0, "dir": true, "unreadable": true, "children": []}}
+{"path": "...", "total_bytes": 0, "unreadable_count": 0, "cloud_evicted_count": 0,
+ "truncated": false,
+ "tree": {"name": "...", "bytes": 0, "dir": true, "unreadable": true,
+          "cloud_evicted": true, "children": []}}
 ```
 
 `bytes` is physical size on disk; hard links count once (a second occurrence shows
 0 bytes). A directory reachable at several paths (APFS firmlinks, e.g. `/Users` vs
 `/System/Volumes/Data/Users`) is likewise counted once, with later occurrences shown
 as empty directories. `unreadable` is present only when true.
+
+A skipped directory falls into one of two disjoint buckets. `unreadable` /
+`unreadable_count` are genuine read failures (permission denied, SIP, I/O). `cloud_evicted`
+/ `cloud_evicted_count` are directories whose content is evicted to iCloud (dataless): the
+scanner deliberately fails fast on them — opening one would make `fileproviderd` materialize
+(download) the whole package, so with materialization disabled the open returns `EDEADLK` and
+the directory is recorded as evicted rather than downloaded. Such directories occupy ~no local
+disk space, so their size is 0 and they are intentionally not descended into. The two counts do
+not overlap: `unreadable_count` no longer includes evicted directories. `cloud_evicted` mirrors
+`unreadable` — present on a node only when true.
 
 ### `discfree dev <path> [--json] [--min-size SIZE]`
 
