@@ -13,12 +13,6 @@ enum DisplayMode: Sendable {
     case devOnly
 }
 
-/// Which pane the result view shows: the sunburst chart, or the category-first reclaim list.
-enum ResultPane: Sendable {
-    case chart
-    case reclaim
-}
-
 /// Drives the whole app: the start → scanning → result state machine, the scan task and
 /// its cancellation, and the (off-main-thread) sunburst layout for the current focus node.
 @MainActor
@@ -68,8 +62,9 @@ final class AppModel {
 
     // MARK: - Reclaim pane state
 
-    /// Which pane the result view shows. A plain view preference; does not touch the tree.
-    var resultPane: ResultPane = .chart
+    /// Whether the Reclaim sheet is presented over the result view. Plain view state; does not
+    /// touch the tree.
+    var reclaimPresented: Bool = false
 
     /// Category-first reclaimable items for the current root, recomputed off the main thread at the
     /// end of each classification pass. Empty during a scan and until the first classify completes.

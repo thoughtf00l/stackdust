@@ -1,9 +1,9 @@
 import SwiftUI
 import DiscFreeCore
 
-/// The "Reclaim" pane: a category-first list of developer-reclaimable items with per-item and
-/// per-group checkboxes, and a footer that batch-moves the selection to the Trash. Shown inside
-/// `ResultView` in place of the sunburst/contents area when `resultPane == .reclaim`.
+/// The "Reclaim" sheet: a category-first list of developer-reclaimable items with per-item and
+/// per-group checkboxes, and a footer that batch-moves the selection to the Trash. Presented as a
+/// sheet over `ResultView` when `reclaimPresented` is true.
 struct ReclaimView: View {
     let model: AppModel
 
@@ -15,13 +15,17 @@ struct ReclaimView: View {
     private let collapsedItemLimit = 12
 
     var body: some View {
-        Group {
-            if model.scanActive {
-                emptyState("Available after the scan completes.")
-            } else if model.reclaimGroups.isEmpty {
-                emptyState("Nothing reclaimable found.")
-            } else {
-                content
+        VStack(spacing: 0) {
+            header
+            Divider()
+            Group {
+                if model.scanActive {
+                    emptyState("Available after the scan completes.")
+                } else if model.reclaimGroups.isEmpty {
+                    emptyState("Nothing reclaimable found.")
+                } else {
+                    content
+                }
             }
         }
         .confirmationDialog(
@@ -37,6 +41,49 @@ struct ReclaimView: View {
         } message: { pending in
             Text(trashMessage(for: pending))
         }
+        // The batch trash surfaces failures via `errorMessage`. ResultView carries the same alert,
+        // but while this sheet is up it covers ResultView and macOS defers a covered alert — so the
+        // sheet mirrors the alert to keep failures visible. Both bind to `errorMessage`; only the
+        // topmost view in the hierarchy presents, and dismissing clears the shared state for both.
+        .alert(
+            "Couldn’t Move to Trash",
+            isPresented: Binding(
+                get: { model.errorMessage != nil },
+                set: { if !$0 { model.dismissError() } }
+            ),
+            presenting: model.errorMessage
+        ) { _ in
+            Button("OK", role: .cancel) { model.dismissError() }
+        } message: { message in
+            Text(message)
+        }
+    }
+
+    /// The sheet's title bar: "Reclaim", the grand total reclaimable below it, and a Done button
+    /// (Escape) that dismisses the sheet. Shown in every state so the sheet is always dismissible.
+    private var header: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Reclaim")
+                    .font(.headline)
+                if reclaimTotalBytes > 0 {
+                    Text("\(byteString(reclaimTotalBytes)) reclaimable")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+            Spacer()
+            Button("Done") { model.reclaimPresented = false }
+                .keyboardShortcut(.cancelAction)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    /// Grand total across every group — the sum of the per-group totals.
+    private var reclaimTotalBytes: Int64 {
+        model.reclaimGroups.reduce(0) { $0 + $1.totalBytes }
     }
 
     private func emptyState(_ text: String) -> some View {

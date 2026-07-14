@@ -13,14 +13,6 @@ struct ResultView: View {
                 BreadcrumbBar(path: model.focusPath) { model.jump(to: $0) }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                Picker("Pane", selection: resultPaneBinding) {
-                    Text("Chart").tag(ResultPane.chart)
-                    Text("Reclaim").tag(ResultPane.reclaim)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-
                 Picker("Display mode", selection: displayModeBinding) {
                     Text("All").tag(DisplayMode.all)
                     Text("Reclaimable").tag(DisplayMode.devHighlight)
@@ -28,6 +20,13 @@ struct ResultView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .fixedSize()
+
+                Button {
+                    model.reclaimPresented = true
+                } label: {
+                    Label("Reclaim…", systemImage: "arrow.up.trash")
+                }
                 .fixedSize()
             }
             .padding(.horizontal, 12)
@@ -51,9 +50,7 @@ struct ResultView: View {
                 Divider()
             }
 
-            if model.resultPane == .reclaim {
-                ReclaimView(model: model)
-            } else if let focus = model.focus {
+            if let focus = model.focus {
                 if model.displayMode == .devOnly && model.focusDisplayTotal == 0 {
                     emptyDevState
                 } else {
@@ -140,14 +137,21 @@ struct ResultView: View {
         } message: { message in
             Text(message)
         }
+        .sheet(isPresented: reclaimPresentedBinding) {
+            ReclaimView(model: model)
+                .frame(
+                    minWidth: 560, idealWidth: 640,
+                    minHeight: 480, idealHeight: 620
+                )
+        }
     }
 
     private var displayModeBinding: Binding<DisplayMode> {
         Binding(get: { model.displayMode }, set: { model.displayMode = $0 })
     }
 
-    private var resultPaneBinding: Binding<ResultPane> {
-        Binding(get: { model.resultPane }, set: { model.resultPane = $0 })
+    private var reclaimPresentedBinding: Binding<Bool> {
+        Binding(get: { model.reclaimPresented }, set: { model.reclaimPresented = $0 })
     }
 
     /// The Move-to-Trash prompt. For a dev-item root, the category's consequence is appended
