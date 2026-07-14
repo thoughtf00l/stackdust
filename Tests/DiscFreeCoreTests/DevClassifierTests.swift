@@ -132,31 +132,58 @@ final class DevClassifierTests: XCTestCase {
         XCTAssertEqual(devices.devSize, 14_000, "aggregated from both device children")
     }
 
-    // MARK: - " DeviceSupport" suffix rule
+    // MARK: - Per-device/OS-version device-support rule
 
-    func testDeviceSupportSuffixRule() {
-        let ios = dir("iOS 17.0 DeviceSupport", [file("Symbols", 500)])
-        let watch = dir("watchOS DeviceSupport", [file("Symbols", 300)])
-        let bare = dir("DeviceSupport", [file("x", 200)])          // lacks the leading " "
-        let other = dir("SomethingElse", [file("y", 100)])
-        let xcode = dir("Xcode", [ios, watch, bare, other])
+    func testDeviceSupportChildrenClassifiedPerDevice() {
+        // Each device/OS-version folder inside a `<platform> DeviceSupport` container is its own
+        // deviceSupport item across platforms; the container itself does not match (its devSize
+        // aggregates the children), so the user can reclaim one OS version at a time.
+        let iosVersion = dir("iPhone14,2 15.0 (19A346)", [file("Symbols", 500)])
+        let iosOld = dir("15.0 (19A346) arm64e", [file("Symbols", 250)])
+        let iosContainer = dir("iOS DeviceSupport", [iosVersion, iosOld])
+        let watchVersion = dir("Watch6,1 10.0 (21R355)", [file("Symbols", 300)])
+        let watchContainer = dir("watchOS DeviceSupport", [watchVersion])
+        let xcode = dir("Xcode", [iosContainer, watchContainer])
         let root = dir(home, [dir("Library", [dir("Developer", [xcode])])])
 
         DevClassifier.classify(root, using: catalog)
 
-        XCTAssertEqual(ios.devCategory, .xcodeBuild)
-        XCTAssertEqual(watch.devCategory, .xcodeBuild)
-        XCTAssertNil(bare.devCategory, "'DeviceSupport' without the ' DeviceSupport' suffix must not match")
-        XCTAssertNil(other.devCategory)
+        XCTAssertEqual(iosVersion.devCategory, .deviceSupport)
+        XCTAssertEqual(iosOld.devCategory, .deviceSupport)
+        XCTAssertEqual(watchVersion.devCategory, .deviceSupport)
+        XCTAssertEqual(iosVersion.devSize, 500)
+        XCTAssertNil(iosContainer.devCategory,
+                     "the '<platform> DeviceSupport' container itself must not match")
+        XCTAssertEqual(iosContainer.devSize, 750, "aggregated from both version children")
+        XCTAssertNil(watchContainer.devCategory)
+        XCTAssertEqual(watchContainer.devSize, 300)
     }
 
-    func testDeviceSupportSuffixOnlyMatchesDirectlyUnderXcode() {
-        // A "… DeviceSupport" directory anywhere else must not match the suffix rule.
-        let stray = dir("iOS DeviceSupport", [file("z", 111)])
-        let root = dir(home, [stray])
+    func testDeviceSupportContainerRequiresLeadingSpaceSuffix() {
+        // A container whose name is exactly "DeviceSupport" (no leading " " before the suffix) is
+        // not a `<platform> DeviceSupport` directory, so its children must not be classified.
+        let child = dir("15.0 (19A346)", [file("x", 200)])
+        let bare = dir("DeviceSupport", [child])
+        let xcode = dir("Xcode", [bare])
+        let root = dir(home, [dir("Library", [dir("Developer", [xcode])])])
 
         DevClassifier.classify(root, using: catalog)
 
+        XCTAssertNil(child.devCategory,
+                     "a child of 'DeviceSupport' (missing the ' ' before the suffix) must not match")
+        XCTAssertNil(bare.devCategory)
+    }
+
+    func testDeviceSupportOnlyMatchesDirectlyUnderXcode() {
+        // A "<platform> DeviceSupport" directory located anywhere but directly under
+        // ~/Library/Developer/Xcode must not have its children classified as deviceSupport.
+        let child = dir("iPhone14,2 15.0 (19A346)", [file("z", 111)])
+        let stray = dir("iOS DeviceSupport", [child])
+        let root = dir(home, [dir("elsewhere", [stray])])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertNil(child.devCategory, "device support outside ~/Library/Developer/Xcode must not match")
         XCTAssertNil(stray.devCategory)
     }
 
@@ -435,6 +462,7 @@ final class DevClassifierTests: XCTestCase {
             .projectArtifacts: .costsTime,
             .simulators: .losesState,
             .xcodeArchives: .losesState,
+            .deviceSupport: .costsTime,
             .docker: .losesState,
             .appCaches: .costsTime,
             .logs: .safe,

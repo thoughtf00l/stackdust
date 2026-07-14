@@ -484,10 +484,11 @@ final class AppModel {
         }
     }
 
-    /// Friendly labels for the simulator/emulator device items, whose paths are otherwise opaque
-    /// directory names. Runs off the main thread inside the reclaim recompute; this is the one
-    /// place in the reclaim path that touches the disk — reading each CoreSimulator device's
-    /// `device.plist` — and it is bounded to at most a few dozen device directories.
+    /// Friendly labels for reclaim items whose directory names are otherwise opaque: the
+    /// simulator/emulator devices and the per-device/OS-version device-support folders. Runs off
+    /// the main thread inside the reclaim recompute. Only the simulator branch touches the disk —
+    /// it reads each CoreSimulator device's `device.plist`, bounded to a few dozen devices; the
+    /// device-support branch derives its label entirely from the folder name (no disk access).
     private nonisolated static func reclaimDeviceLabels(
         for groups: [ReclaimGroup],
         home: String
@@ -495,20 +496,37 @@ final class AppModel {
         let coreSimulatorDevices = "\(home)/Library/Developer/CoreSimulator/Devices"
         let androidAvd = "\(home)/.android/avd"
         var labels: [ObjectIdentifier: String] = [:]
-        for group in groups where group.category == .simulators {
-            for item in group.items {
-                let parent = (item.path as NSString).deletingLastPathComponent
-                if parent == coreSimulatorDevices {
-                    if let label = coreSimulatorLabel(devicePath: item.path) {
-                        labels[ObjectIdentifier(item.node)] = label
-                    }
-                } else if parent == androidAvd {
-                    let name = (item.path as NSString).lastPathComponent
-                    let stripped = name.hasSuffix(".avd") ? String(name.dropLast(4)) : name
-                    if !stripped.isEmpty {
-                        labels[ObjectIdentifier(item.node)] = stripped
+        for group in groups {
+            switch group.category {
+            case .simulators:
+                for item in group.items {
+                    let parent = (item.path as NSString).deletingLastPathComponent
+                    if parent == coreSimulatorDevices {
+                        if let label = coreSimulatorLabel(devicePath: item.path) {
+                            labels[ObjectIdentifier(item.node)] = label
+                        }
+                    } else if parent == androidAvd {
+                        let name = (item.path as NSString).lastPathComponent
+                        let stripped = name.hasSuffix(".avd") ? String(name.dropLast(4)) : name
+                        if !stripped.isEmpty {
+                            labels[ObjectIdentifier(item.node)] = stripped
+                        }
                     }
                 }
+            case .deviceSupport:
+                // The child dir name (e.g. "iPhone14,2 15.0 (19A346)") carries the device and OS
+                // version; the platform word comes from the parent "<platform> DeviceSupport" dir.
+                for item in group.items {
+                    let parentName = ((item.path as NSString).deletingLastPathComponent as NSString)
+                        .lastPathComponent
+                    guard parentName.hasSuffix(" DeviceSupport") else { continue }
+                    let platform = String(parentName.dropLast(" DeviceSupport".count))
+                    let childName = (item.path as NSString).lastPathComponent
+                    labels[ObjectIdentifier(item.node)] =
+                        AppleDeviceNames.deviceSupportLabel(childName: childName, platform: platform)
+                }
+            default:
+                break
             }
         }
         return labels

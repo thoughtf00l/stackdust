@@ -11,6 +11,11 @@ public enum DevCategory: String, Sendable, CaseIterable {
     /// released builds and cannot be regenerated, so they must never share a risk tier
     /// with regenerable build products.
     case xcodeArchives
+    /// Per-device/OS-version symbol caches under `~/Library/Developer/Xcode/<platform>
+    /// DeviceSupport`. NOT `xcodeBuild`/`safe`: these symbols are copied off a physical
+    /// device the first time it connects, not produced by a rebuild, so without a device
+    /// running that OS version they cannot be re-fetched.
+    case deviceSupport
     /// Simulator/emulator device images and caches (CoreSimulator + Android AVDs).
     case simulators
     /// Downloaded, re-fetchable package/dependency data (SwiftPM, npm, Gradle, Cargo, …).
@@ -46,7 +51,7 @@ extension DevCategory {
         switch self {
         case .xcodeBuild, .logs:
             return .safe
-        case .packageCache, .projectArtifacts, .appCaches, .adobeCache:
+        case .packageCache, .projectArtifacts, .appCaches, .adobeCache, .deviceSupport:
             return .costsTime
         case .simulators, .xcodeArchives, .docker, .iosBackups:
             return .losesState
@@ -60,6 +65,8 @@ extension DevCategory {
             return "Xcode build products"
         case .xcodeArchives:
             return "Xcode archives"
+        case .deviceSupport:
+            return "Device support symbols"
         case .simulators:
             return "Simulators"
         case .packageCache:
@@ -83,7 +90,7 @@ extension DevCategory {
     public var consequence: String {
         switch self {
         case .xcodeBuild:
-            return "Xcode recreates this as needed: build products return on the next build, device-support symbols re-download when a device connects. You lose only build time."
+            return "Xcode recreates these as you build and use it; build products return on the next build. You lose only build time."
         case .packageCache:
             return "Package managers re-download these on demand. The next install or build needs network and extra time."
         case .projectArtifacts:
@@ -92,6 +99,8 @@ extension DevCategory {
             return "Simulator and emulator devices are recreated by their tools, but apps installed on them and their data are gone for good."
         case .xcodeArchives:
             return "Archives hold the debug symbols (dSYMs) of your released builds — without them crash reports from those builds cannot be symbolicated. They cannot be regenerated."
+        case .deviceSupport:
+            return "Xcode copies these symbols from a device the first time it connects. Reconnecting a device with that OS version recreates them; without such a device they cannot be re-fetched — but they are only needed for debugging devices running that version."
         case .docker:
             return "Docker's VM disk holds all local images, containers, and volumes. Re-pullable images come back; anything not pushed elsewhere is gone."
         case .appCaches:
@@ -110,11 +119,14 @@ extension DevCategory {
 ///
 /// There are three rule kinds:
 /// - **Absolute path rules** match a fixed location under the user's home directory
-///   (e.g. `~/Library/Developer/Xcode/DerivedData`), plus one suffix rule for the
-///   `… DeviceSupport` directories directly under `~/Library/Developer/Xcode`.
+///   (e.g. `~/Library/Developer/Xcode/DerivedData`).
 /// - **Children-of rules** match every *directory* that is a direct child of a listed
 ///   parent (the parent itself does not match), giving per-child granularity — e.g.
-///   each app's folder under `~/Library/Caches` becomes its own `appCaches` item.
+///   each app's folder under `~/Library/Caches` becomes its own `appCaches` item. The
+///   device-support rule is a special children-of rule: each device/OS-version folder
+///   inside a `<platform> DeviceSupport` directory (itself directly under
+///   `~/Library/Developer/Xcode`) becomes its own `deviceSupport` item, while the
+///   `<platform> DeviceSupport` container itself does not match.
 /// - **Name rules** match a directory of a given name anywhere in the tree, some behind a
 ///   guard that avoids false positives (e.g. `.build` only next to a `Package.swift`).
 ///
@@ -146,7 +158,9 @@ public struct DevItemCatalog {
     /// a listed parent keep their precise category while the rest fall to this blanket rule.
     let childrenOfParents: [String: DevCategory]
 
-    /// The directory whose direct children ending in " DeviceSupport" are Xcode device support.
+    /// The directory directly under which the `<platform> DeviceSupport` containers live. Each
+    /// such container's direct child directories (one per device/OS version) are `.deviceSupport`;
+    /// the container itself does not match.
     let deviceSupportParent: String
 
     /// Directory name → rule, matched anywhere in the tree.
@@ -256,9 +270,20 @@ public struct DevItemCatalog {
         if let category = exactPaths[path] {
             return category
         }
-        if node.name.hasSuffix(" DeviceSupport"),
-           path == "\(deviceSupportParent)/\(node.name)" {
-            return .xcodeBuild
+        // Per-device/OS-version device-support rule. A candidate matches when its parent is a
+        // `<platform> DeviceSupport` directory sitting directly under `~/Library/Developer/Xcode`,
+        // i.e. the parent path is `<deviceSupportParent>/<name ending in " DeviceSupport">`. The
+        // `<platform> DeviceSupport` container itself therefore never matches (its parent is
+        // `deviceSupportParent`, which does not end in " DeviceSupport") — its devSize aggregates
+        // these children. The parent path is `path` minus its last "/component"; no
+        // `FileNode.path` rebuilds.
+        if let slash = path.lastIndex(of: "/") {
+            let parentPath = String(path[..<slash])
+            if parentPath.hasSuffix(" DeviceSupport"),
+               let parentSlash = parentPath.lastIndex(of: "/"),
+               String(parentPath[..<parentSlash]) == deviceSupportParent {
+                return .deviceSupport
+            }
         }
         // Children-of rule: match when the candidate's parent path is a listed parent. The parent
         // is `path` with its last "/component" dropped; the parent itself never matches (its own

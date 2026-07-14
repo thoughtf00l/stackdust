@@ -87,10 +87,14 @@ package-manager caches, `node_modules`, Rust `target` next to a `Cargo.toml`,
 Android AVDs and SDK system images, Gradle wrapper, Docker VM disks, per-app caches
 under `~/Library/Caches`, `~/Library/Logs`, local iOS device backups, Adobe media
 caches, ...), largest first. Categories: `xcodeBuild`, `xcodeArchives`,
-`simulators`, `packageCache`, `projectArtifacts`, `docker`, `appCaches`, `logs`,
-`iosBackups`, `adobeCache`. Xcode Archives are a separate category from `xcodeBuild`
-because they hold released builds' dSYMs and cannot be regenerated, so
-`clean --category xcodeBuild` never selects them. `appCaches` reports each app's
+`deviceSupport`, `simulators`, `packageCache`, `projectArtifacts`, `docker`,
+`appCaches`, `logs`, `iosBackups`, `adobeCache`. Xcode Archives are a separate
+category from `xcodeBuild` because they hold released builds' dSYMs and cannot be
+regenerated, so `clean --category xcodeBuild` never selects them. `deviceSupport`
+reports each `~/Library/Developer/Xcode/<platform> DeviceSupport` entry per
+device/OS version (not the whole folder) and is its own category, out of `xcodeBuild`,
+because Xcode copies those symbols off a connected device and cannot regenerate them
+without a device running that OS version. `appCaches` reports each app's
 folder under `~/Library/Caches` as its own item (folders already covered by a more
 specific category, e.g. Xcode or SwiftPM caches, keep that category instead), so a
 caller can reclaim individual apps rather than the whole caches directory. JSON:
@@ -99,7 +103,7 @@ caller can reclaim individual apps rather than the whole caches directory. JSON:
 `risk` is the category's risk tier as a snake_case token: `safe` (regenerated at no
 cost beyond build time — `xcodeBuild`, `logs`), `costs_time` (comes back on demand,
 paying network and time — `packageCache`, `projectArtifacts`, `appCaches`,
-`adobeCache`), or `loses_state` (trashing destroys non-reproducible state —
+`adobeCache`, `deviceSupport`), or `loses_state` (trashing destroys non-reproducible state —
 `simulators`, `xcodeArchives`, `docker`, `iosBackups`). The human (non-JSON) output
 groups items under a per-category header (`displayName — total [risk]`), largest
 category first.
