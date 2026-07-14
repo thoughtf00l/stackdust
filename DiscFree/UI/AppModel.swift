@@ -557,6 +557,18 @@ final class AppModel {
                         }
                     }
                 }
+            case .xcodeArchives:
+                // Each item is a `<Name DD.MM.YY, HH.mm>.xcarchive` bundle; show the bundle name
+                // without the `.xcarchive` suffix. No disk I/O — the category already identifies
+                // these, so no path-parent check is needed.
+                for item in group.items {
+                    let name = (item.path as NSString).lastPathComponent
+                    let stripped = name.hasSuffix(".xcarchive")
+                        ? String(name.dropLast(".xcarchive".count)) : name
+                    if !stripped.isEmpty {
+                        labels[ObjectIdentifier(item.node)] = stripped
+                    }
+                }
             case .deviceSupport:
                 // The child dir name (e.g. "iPhone14,2 15.0 (19A346)") carries the device and OS
                 // version; the platform word comes from the parent "<platform> DeviceSupport" dir.

@@ -101,8 +101,9 @@ under `~/Library/Caches`, `~/Library/Logs`, local iOS device backups, Adobe medi
 caches, ...), largest first. Categories: `xcodeBuild`, `xcodeArchives`,
 `deviceSupport`, `simulators`, `packageCache`, `projectArtifacts`, `docker`,
 `appCaches`, `logs`, `iosBackups`, `adobeCache`. Xcode Archives are a separate
-category from `xcodeBuild` because they hold released builds' dSYMs and cannot be
-regenerated, so `clean --category xcodeBuild` never selects them. `deviceSupport`
+category from `xcodeBuild`, reported as one item per `.xcarchive` build, because they
+hold released builds' dSYMs and cannot be regenerated, so `clean --category xcodeBuild`
+never selects them. `deviceSupport`
 reports each `~/Library/Developer/Xcode/<platform> DeviceSupport` entry per
 device/OS version (not the whole folder) and is its own category, out of `xcodeBuild`,
 because Xcode copies those symbols off a connected device and cannot regenerate them

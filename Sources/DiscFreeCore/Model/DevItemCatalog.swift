@@ -117,7 +117,7 @@ extension DevCategory {
 
 /// The set of rules that identify reclaimable items in a scanned tree.
 ///
-/// There are three rule kinds:
+/// There are four rule kinds:
 /// - **Absolute path rules** match a fixed location under the user's home directory
 ///   (e.g. `~/Library/Developer/Xcode/DerivedData`).
 /// - **Children-of rules** match every *directory* that is a direct child of a listed
@@ -127,6 +127,11 @@ extension DevCategory {
 ///   inside a `<platform> DeviceSupport` directory (itself directly under
 ///   `~/Library/Developer/Xcode`) becomes its own `deviceSupport` item, while the
 ///   `<platform> DeviceSupport` container itself does not match.
+/// - **Name-suffix rules** match a directory whose name ends with a given suffix anywhere in
+///   the tree, for self-describing bundles: an `.xcarchive` is unambiguously an Xcode archive
+///   wherever it lives, so each build under `~/Library/Developer/Xcode/Archives` (or a custom
+///   Organizer location) becomes its own `xcodeArchives` item, and the `Archives` root itself
+///   no longer needs a rule — its date-folder children aggregate via devSize like any container.
 /// - **Name rules** match a directory of a given name anywhere in the tree, some behind a
 ///   guard that avoids false positives (e.g. `.build` only next to a `Package.swift`).
 ///
@@ -163,6 +168,12 @@ public struct DevItemCatalog {
     /// the container itself does not match.
     let deviceSupportParent: String
 
+    /// Directory-name SUFFIX → category, matched anywhere in the tree. Unlike `nameRules` (exact
+    /// name), these match any directory whose name ends with the suffix — used for self-describing
+    /// bundles like `.xcarchive`. Kept short so the per-directory cost stays a couple of `hasSuffix`
+    /// checks.
+    let nameSuffixRules: [(suffix: String, category: DevCategory)]
+
     /// Directory name → rule, matched anywhere in the tree.
     let nameRules: [String: NameRule]
 
@@ -173,7 +184,6 @@ public struct DevItemCatalog {
         // Home-relative location → category. Turned into absolute paths below.
         let relative: [(String, DevCategory)] = [
             ("Library/Developer/Xcode/DerivedData", .xcodeBuild),
-            ("Library/Developer/Xcode/Archives", .xcodeArchives),
             ("Library/Developer/Xcode/UserData/Previews", .xcodeBuild),
             ("Library/Developer/CoreSimulator/Caches", .simulators),
             ("Library/Caches/com.apple.dt.Xcode", .xcodeBuild),
@@ -223,6 +233,14 @@ public struct DevItemCatalog {
         ]
 
         self.deviceSupportParent = "\(home)/Library/Developer/Xcode"
+
+        // Directory-name SUFFIX rules. An `.xcarchive` is a self-describing bundle: each build
+        // under `~/Library/Developer/Xcode/Archives/<date>/` (or a custom Organizer location) is
+        // its own reclaim item, so the user can trash one stale archive and keep the rest. The
+        // `Archives` root no longer has an exactPath — its date folders aggregate via devSize.
+        self.nameSuffixRules = [
+            (".xcarchive", .xcodeArchives),
+        ]
 
         // Directory-name rules, matched anywhere in the tree. Two names are DELIBERATELY ABSENT;
         // do not re-add them:
@@ -291,6 +309,13 @@ public struct DevItemCatalog {
         if let slash = path.lastIndex(of: "/"),
            let category = childrenOfParents[String(path[..<slash])] {
             return category
+        }
+        // Name-suffix rules. An `.xcarchive` bundle is unambiguous wherever it lives, so this also
+        // catches archives in custom Organizer locations; the Archives root itself does not match
+        // (its date-folder children aggregate via devSize like any container). Checked after the
+        // specific rules above and before the exact-name rules below; a couple of hasSuffix checks.
+        for rule in nameSuffixRules where node.name.hasSuffix(rule.suffix) {
+            return rule.category
         }
         if let rule = nameRules[node.name], satisfies(rule.guardKind, at: node) {
             return rule.category

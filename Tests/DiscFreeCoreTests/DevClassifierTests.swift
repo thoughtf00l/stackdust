@@ -51,16 +51,47 @@ final class DevClassifierTests: XCTestCase {
         XCTAssertEqual(gradle.devSize, 4_000)
     }
 
-    func testArchivesClassifiedAsXcodeArchives() {
-        // Archives are their own category, split out of xcodeBuild: they are not regenerable.
-        let archives = dir("Archives", [file("MyApp.xcarchive", 2_000)])
+    func testXcarchiveBundleUnderArchivesMatchesPerBuild() {
+        // Each `.xcarchive` bundle is its own xcodeArchives item so a single stale build can be
+        // trashed while the rest stay. The `Archives` root and its date-folder children no longer
+        // match — they aggregate via devSize like any plain container.
+        let build = dir("MyApp 01.02.24, 10.30.xcarchive", [file("Info.plist", 2_000)])
+        let dateFolder = dir("2024-02-01", [build])
+        let archives = dir("Archives", [dateFolder])
         let xcode = dir("Xcode", [archives])
         let root = dir(home, [dir("Library", [dir("Developer", [xcode])])])
 
         DevClassifier.classify(root, using: catalog)
 
-        XCTAssertEqual(archives.devCategory, .xcodeArchives)
-        XCTAssertEqual(archives.devSize, 2_000)
+        XCTAssertEqual(build.devCategory, .xcodeArchives)
+        XCTAssertEqual(build.devSize, 2_000)
+        XCTAssertNil(archives.devCategory, "the Archives root itself no longer matches")
+        XCTAssertNil(dateFolder.devCategory, "the date folder is a plain container")
+        XCTAssertEqual(dateFolder.devSize, 2_000, "aggregated from the .xcarchive child")
+        XCTAssertEqual(archives.devSize, 2_000, "aggregated up through the date folder")
+    }
+
+    func testXcarchiveMatchesInCustomLocation() {
+        // A `.xcarchive` is unambiguous wherever it lives, so a custom Organizer location matches.
+        let build = dir("Nightly.xcarchive", [file("dSYMs", 5_000)])
+        let root = dir("/work", [dir("CustomArchives", [build])])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertEqual(build.devCategory, .xcodeArchives)
+        XCTAssertEqual(build.devSize, 5_000)
+    }
+
+    func testXcarchiveFileDoesNotMatch() {
+        // The catalog matches directories only (the `node.isDirectory` guard in `category(for:)`),
+        // so a FILE whose name merely ends in `.xcarchive` must not match.
+        let bogus = file("stray.xcarchive", 3_000)
+        let root = dir("/work", [dir("misc", [bogus])])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertNil(bogus.devCategory, "a file named *.xcarchive must not match (directories only)")
+        XCTAssertEqual(root.devSize, 0)
     }
 
     func testGradleWrapperClassifiedAsPackageCache() {
