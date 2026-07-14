@@ -9,7 +9,7 @@ public enum DevCategory: String, Sendable {
     /// released builds and cannot be regenerated, so they must never share a risk tier
     /// with regenerable build products.
     case xcodeArchives
-    /// CoreSimulator device images and caches.
+    /// Simulator/emulator device images and caches (CoreSimulator + Android AVDs).
     case simulators
     /// Downloaded, re-fetchable package/dependency data (SwiftPM, npm, Gradle, Cargo, …).
     case packageCache
@@ -71,7 +71,7 @@ extension DevCategory {
         case .projectArtifacts:
             return "The project's own tooling regenerates this (npm install, cargo build, …) the next time you build. Only worth deleting for projects you are not actively using."
         case .simulators:
-            return "Xcode recreates simulator devices, but apps installed on them and their data are gone for good."
+            return "Simulator and emulator devices are recreated by their tools, but apps installed on them and their data are gone for good."
         case .xcodeArchives:
             return "Archives hold the debug symbols (dSYMs) of your released builds — without them crash reports from those builds cannot be symbolicated. They cannot be regenerated."
         case .docker:
@@ -129,6 +129,7 @@ public struct DevItemCatalog {
             ("Library/Developer/Xcode/UserData/Previews", .xcodeBuild),
             ("Library/Developer/CoreSimulator/Devices", .simulators),
             ("Library/Developer/CoreSimulator/Caches", .simulators),
+            (".android/avd", .simulators),
             ("Library/Caches/com.apple.dt.Xcode", .xcodeBuild),
             ("Library/Caches/org.swift.swiftpm", .packageCache),
             ("Library/org.swift.swiftpm", .packageCache),
@@ -139,6 +140,9 @@ public struct DevItemCatalog {
             ("Library/Caches/Yarn", .packageCache),
             (".npm", .packageCache),
             (".gradle/caches", .packageCache),
+            (".gradle/wrapper", .packageCache),
+            (".konan", .packageCache),
+            ("Library/Android/sdk/system-images", .packageCache),
             (".m2/repository", .packageCache),
             (".cargo/registry", .packageCache),
             (".cargo/git", .packageCache),
@@ -163,6 +167,12 @@ public struct DevItemCatalog {
             "target": NameRule(category: .projectArtifacts, guardKind: .sibling(["Cargo.toml"])),
             "build": NameRule(category: .projectArtifacts,
                               guardKind: .sibling(["gradlew", "build.gradle", "build.gradle.kts"])),
+            ".gradle": NameRule(
+                category: .projectArtifacts,
+                guardKind: .sibling([
+                    "gradlew", "build.gradle", "build.gradle.kts",
+                    "settings.gradle", "settings.gradle.kts",
+                ])),
             ".venv": NameRule(category: .projectArtifacts, guardKind: .child("pyvenv.cfg")),
             "venv": NameRule(category: .projectArtifacts, guardKind: .child("pyvenv.cfg")),
             ".next": NameRule(category: .projectArtifacts, guardKind: .sibling(["package.json"])),

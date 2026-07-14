@@ -63,6 +63,50 @@ final class DevClassifierTests: XCTestCase {
         XCTAssertEqual(archives.devSize, 2_000)
     }
 
+    func testGradleWrapperClassifiedAsPackageCache() {
+        let wrapper = dir("wrapper", [file("dists", 5_000)])
+        let gradle = dir(".gradle", [wrapper])
+        let root = dir(home, [gradle])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertEqual(wrapper.devCategory, .packageCache)
+        XCTAssertEqual(wrapper.devSize, 5_000)
+        XCTAssertNil(gradle.devCategory, "the enclosing .gradle has no project marker sibling here")
+    }
+
+    func testKonanClassifiedAsPackageCache() {
+        let konan = dir(".konan", [file("kotlin-native-prebuilt", 8_000)])
+        let root = dir(home, [konan])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertEqual(konan.devCategory, .packageCache)
+        XCTAssertEqual(konan.devSize, 8_000)
+    }
+
+    func testAndroidSystemImagesClassifiedAsPackageCache() {
+        let images = dir("system-images", [file("android-34", 12_000)])
+        let sdk = dir("sdk", [images])
+        let root = dir(home, [dir("Library", [dir("Android", [sdk])])])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertEqual(images.devCategory, .packageCache)
+        XCTAssertEqual(images.devSize, 12_000)
+    }
+
+    func testAndroidAvdClassifiedAsSimulators() {
+        let avd = dir("avd", [file("Pixel_6.avd", 3_000)])
+        let android = dir(".android", [avd])
+        let root = dir(home, [android])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertEqual(avd.devCategory, .simulators)
+        XCTAssertEqual(avd.devSize, 3_000)
+    }
+
     // MARK: - " DeviceSupport" suffix rule
 
     func testDeviceSupportSuffixRule() {
@@ -130,6 +174,32 @@ final class DevClassifierTests: XCTestCase {
         DevClassifier.classify(root, using: catalog)
 
         XCTAssertEqual(buildDir.devCategory, .projectArtifacts)
+    }
+
+    func testProjectGradleDirMatchesNextToProjectMarker() {
+        let nextToWrapper = dir(".gradle", [file("8.5", 6_000)])
+        let wrapperProject = dir("app", [nextToWrapper, file("gradlew", 30)])
+
+        let nextToSettings = dir(".gradle", [file("8.6", 4_000)])
+        let settingsProject = dir("lib", [nextToSettings, file("settings.gradle.kts", 40)])
+
+        let root = dir("/work", [wrapperProject, settingsProject])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertEqual(nextToWrapper.devCategory, .projectArtifacts)
+        XCTAssertEqual(nextToSettings.devCategory, .projectArtifacts)
+    }
+
+    func testProjectGradleDirDoesNotMatchWithoutProjectMarker() {
+        let bare = dir(".gradle", [file("8.5", 6_000)])
+        let randomFolder = dir("random", [bare, file("notes.txt", 10)])
+        let root = dir("/work", [randomFolder])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertNil(bare.devCategory, "a bare .gradle without a project-marker sibling must not match")
+        XCTAssertEqual(bare.devSize, 0)
     }
 
     func testUnguardedNameRuleMatchesAnywhere() {
