@@ -135,6 +135,79 @@ final class DevClassifierTests: XCTestCase {
         XCTAssertNil(stray.devCategory)
     }
 
+    // MARK: - Children-of rule (~/Library/Caches → appCaches)
+
+    func testCachesChildDirectoryClassifiedAsAppCaches() {
+        let googleCache = dir("Google", [file("data", 3_000)])
+        let looseFile = file("loose.log", 500)                  // a FILE child must not match
+        let caches = dir("Caches", [googleCache, looseFile])
+        let root = dir(home, [dir("Library", [caches])])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertEqual(googleCache.devCategory, .appCaches,
+                       "a directory child of ~/Library/Caches is an app cache")
+        XCTAssertEqual(googleCache.devSize, 3_000)
+        XCTAssertNil(looseFile.devCategory, "a file child of ~/Library/Caches must not match")
+        XCTAssertNil(caches.devCategory, "~/Library/Caches itself must not match the children-of rule")
+        XCTAssertEqual(caches.devSize, 3_000, "aggregated from the app-cache child, not the loose file")
+    }
+
+    func testExactPathInsideCachesWinsOverAppCachesBlanket() {
+        // exactPaths are checked before the children-of blanket, so pinned cache folders keep
+        // their precise category while everything else under Caches becomes appCaches.
+        let xcodeCache = dir("com.apple.dt.Xcode", [file("x", 4_000)])
+        let spm = dir("org.swift.swiftpm", [file("y", 2_000)])
+        let googleCache = dir("Google", [file("z", 1_000)])
+        let caches = dir("Caches", [xcodeCache, spm, googleCache])
+        let root = dir(home, [dir("Library", [caches])])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertEqual(xcodeCache.devCategory, .xcodeBuild, "exactPaths win over the appCaches blanket")
+        XCTAssertEqual(spm.devCategory, .packageCache, "exactPaths win over the appCaches blanket")
+        XCTAssertEqual(googleCache.devCategory, .appCaches)
+    }
+
+    // MARK: - New exactPath rules (logs, iOS backups, Adobe media caches)
+
+    func testLibraryLogsClassifiedAsLogs() {
+        let logs = dir("Logs", [file("DiagnosticReports", 1_500)])
+        let root = dir(home, [dir("Library", [logs])])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertEqual(logs.devCategory, .logs)
+        XCTAssertEqual(logs.devSize, 1_500)
+    }
+
+    func testMobileSyncBackupClassifiedAsIosBackups() {
+        let uuidBackup = dir("00008030-ABC", [file("Manifest.db", 9_000)])
+        let backup = dir("Backup", [uuidBackup])
+        let mobileSync = dir("MobileSync", [backup])
+        let appSupport = dir("Application Support", [mobileSync])
+        let root = dir(home, [dir("Library", [appSupport])])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertEqual(backup.devCategory, .iosBackups)
+        XCTAssertEqual(backup.devSize, 9_000)
+        XCTAssertNil(uuidBackup.devCategory, "per-backup UUID dirs are inside the matched root")
+    }
+
+    func testAdobeMediaCacheDirsClassifiedAsAdobeCache() {
+        let mediaCacheFiles = dir("Media Cache Files", [file("a.cfa", 6_000)])
+        let mediaCache = dir("Media Cache", [file("b.pek", 4_000)])
+        let common = dir("Common", [mediaCacheFiles, mediaCache])
+        let appSupport = dir("Application Support", [dir("Adobe", [common])])
+        let root = dir(home, [dir("Library", [appSupport])])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertEqual(mediaCacheFiles.devCategory, .adobeCache)
+        XCTAssertEqual(mediaCache.devCategory, .adobeCache)
+    }
+
     // MARK: - Name rules with and without their guard
 
     func testTargetMatchesOnlyNextToCargoToml() {
@@ -288,7 +361,9 @@ final class DevClassifierTests: XCTestCase {
     // MARK: - Risk tier / consequence copy
 
     /// The exhaustive switches in `riskTier`/`consequence` already force every case to be
-    /// handled at compile time; this guards the mapping and against an accidental empty string.
+    /// handled at compile time; this guards the tier mapping and against an accidental empty
+    /// string. Iterating `DevCategory.allCases` fails the moment a new category is added without
+    /// an expected tier here, so the mapping cannot silently drift.
     func testRiskTierAndConsequenceForEveryCategory() {
         let expectedTier: [DevCategory: DevRiskTier] = [
             .xcodeBuild: .safe,
@@ -297,12 +372,24 @@ final class DevClassifierTests: XCTestCase {
             .simulators: .losesState,
             .xcodeArchives: .losesState,
             .docker: .losesState,
+            .appCaches: .costsTime,
+            .logs: .safe,
+            .iosBackups: .losesState,
+            .adobeCache: .costsTime,
         ]
-        for (category, tier) in expectedTier {
+        for category in DevCategory.allCases {
+            guard let tier = expectedTier[category] else {
+                XCTFail("no expected tier registered for \(category.rawValue)")
+                continue
+            }
             XCTAssertEqual(category.riskTier, tier, "unexpected tier for \(category.rawValue)")
             XCTAssertFalse(
                 category.consequence.isEmpty,
                 "\(category.rawValue) must have a non-empty consequence"
+            )
+            XCTAssertFalse(
+                category.displayName.isEmpty,
+                "\(category.rawValue) must have a non-empty displayName"
             )
         }
     }

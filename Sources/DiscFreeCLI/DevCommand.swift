@@ -3,13 +3,13 @@ import DiscFreeCore
 import Foundation
 
 extension DiscFree {
-    /// `discfree dev <path>` — scan, classify, and list developer-reclaimable item roots.
+    /// `discfree dev <path>` — scan, classify, and list reclaimable item roots.
     struct Dev: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "List developer-reclaimable items (build caches, package caches, ...).",
+            abstract: "List reclaimable items (build/package caches, app caches, logs, iOS backups, Adobe media caches, ...).",
             discussion: """
-            Reports only the roots of reclaimable items (e.g. a whole node_modules), never the \
-            files inside them, sorted largest-first.
+            Reports only the roots of reclaimable items (e.g. a whole node_modules or app cache \
+            folder), never the files inside them, sorted largest-first.
 
             Example:
               discfree dev ~ --min-size 100M --json

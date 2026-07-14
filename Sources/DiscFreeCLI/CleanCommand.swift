@@ -3,14 +3,14 @@ import DiscFreeCore
 import Foundation
 
 extension DiscFree {
-    /// `discfree clean <path>` — select developer-reclaimable items and move them to Trash.
+    /// `discfree clean <path>` — select reclaimable items and move them to Trash.
     ///
     /// Non-destructive by default: without `--yes` (or with `--dry-run`) it only prints the plan.
-    /// It never deletes anything the classifier did not mark as a dev item, and it uses the
-    /// Trash rather than unlinking, so an action is recoverable and re-running is idempotent.
+    /// It never deletes anything the classifier did not mark as a reclaimable item, and it uses
+    /// the Trash rather than unlinking, so an action is recoverable and re-running is idempotent.
     struct Clean: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Move developer-reclaimable items to the Trash (opt-in, recoverable).",
+            abstract: "Move reclaimable items to the Trash (opt-in, recoverable).",
             discussion: """
             By default this prints a plan and exits without touching anything. Pass --yes to \
             actually move the selected items to the Trash. Items are never deleted permanently.

@@ -23,8 +23,8 @@ struct ResultView: View {
 
                 Picker("Display mode", selection: displayModeBinding) {
                     Text("All").tag(DisplayMode.all)
-                    Text("Dev").tag(DisplayMode.devHighlight)
-                    Text("Dev Only").tag(DisplayMode.devOnly)
+                    Text("Reclaimable").tag(DisplayMode.devHighlight)
+                    Text("Reclaimable Only").tag(DisplayMode.devOnly)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -167,7 +167,7 @@ struct ResultView: View {
             Image(systemName: "wrench.and.screwdriver")
                 .font(.system(size: 34))
                 .foregroundStyle(.tertiary)
-            Text("No developer items in this folder")
+            Text("No reclaimable items in this folder")
                 .foregroundStyle(.secondary)
             Spacer()
         }
