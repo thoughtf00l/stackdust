@@ -51,6 +51,18 @@ final class DevClassifierTests: XCTestCase {
         XCTAssertEqual(gradle.devSize, 4_000)
     }
 
+    func testArchivesClassifiedAsXcodeArchives() {
+        // Archives are their own category, split out of xcodeBuild: they are not regenerable.
+        let archives = dir("Archives", [file("MyApp.xcarchive", 2_000)])
+        let xcode = dir("Xcode", [archives])
+        let root = dir(home, [dir("Library", [dir("Developer", [xcode])])])
+
+        DevClassifier.classify(root, using: catalog)
+
+        XCTAssertEqual(archives.devCategory, .xcodeArchives)
+        XCTAssertEqual(archives.devSize, 2_000)
+    }
+
     // MARK: - " DeviceSupport" suffix rule
 
     func testDeviceSupportSuffixRule() {
@@ -201,5 +213,27 @@ final class DevClassifierTests: XCTestCase {
         XCTAssertTrue(DevClassifier.isWithinDevItem(deep))
         XCTAssertFalse(DevClassifier.isWithinDevItem(proj), "proj holds a dev item but is not one")
         XCTAssertFalse(DevClassifier.isWithinDevItem(root))
+    }
+
+    // MARK: - Risk tier / consequence copy
+
+    /// The exhaustive switches in `riskTier`/`consequence` already force every case to be
+    /// handled at compile time; this guards the mapping and against an accidental empty string.
+    func testRiskTierAndConsequenceForEveryCategory() {
+        let expectedTier: [DevCategory: DevRiskTier] = [
+            .xcodeBuild: .safe,
+            .packageCache: .costsTime,
+            .projectArtifacts: .costsTime,
+            .simulators: .losesState,
+            .xcodeArchives: .losesState,
+            .docker: .losesState,
+        ]
+        for (category, tier) in expectedTier {
+            XCTAssertEqual(category.riskTier, tier, "unexpected tier for \(category.rawValue)")
+            XCTAssertFalse(
+                category.consequence.isEmpty,
+                "\(category.rawValue) must have a non-empty consequence"
+            )
+        }
     }
 }

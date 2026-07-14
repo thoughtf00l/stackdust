@@ -9,6 +9,7 @@ enum Categories {
     /// Every category the classifier can assign, in a stable order for help text and errors.
     static let all: [DevCategory] = [
         .xcodeBuild,
+        .xcodeArchives,
         .simulators,
         .packageCache,
         .projectArtifacts,

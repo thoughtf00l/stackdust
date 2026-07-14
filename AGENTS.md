@@ -84,8 +84,10 @@ as empty directories. `unreadable` is present only when true.
 
 Developer-reclaimable items (Xcode DerivedData/Archives/DeviceSupport, simulators,
 package-manager caches, `node_modules`, Rust `target` next to a `Cargo.toml`, Docker
-VM disks, ...), largest first. Categories: `xcodeBuild`, `simulators`,
-`packageCache`, `projectArtifacts`, `docker`. JSON:
+VM disks, ...), largest first. Categories: `xcodeBuild`, `xcodeArchives`,
+`simulators`, `packageCache`, `projectArtifacts`, `docker`. Xcode Archives are a
+separate category from `xcodeBuild` because they hold released builds' dSYMs and
+cannot be regenerated, so `clean --category xcodeBuild` never selects them. JSON:
 `{"items": [{"path", "category", "bytes"}], "total_bytes"}`.
 
 ### `discfree clean <path> [--json] [--category c1,c2] [--min-size SIZE] [--yes] [--dry-run]`

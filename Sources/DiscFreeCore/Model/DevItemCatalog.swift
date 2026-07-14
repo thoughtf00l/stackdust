@@ -3,8 +3,12 @@ import Foundation
 /// Coarse grouping of developer-reclaimable items, used to colour/label them later.
 /// Backed by `String` so it can be persisted or shown without a separate mapping table.
 public enum DevCategory: String, Sendable {
-    /// Xcode build products, archives, device-support symbols, and Xcode's own caches.
+    /// Xcode build products, device-support symbols, and Xcode's own caches.
     case xcodeBuild
+    /// Xcode archives. Kept separate from `xcodeBuild` because they hold the dSYMs of
+    /// released builds and cannot be regenerated, so they must never share a risk tier
+    /// with regenerable build products.
+    case xcodeArchives
     /// CoreSimulator device images and caches.
     case simulators
     /// Downloaded, re-fetchable package/dependency data (SwiftPM, npm, Gradle, Cargo, …).
@@ -13,6 +17,49 @@ public enum DevCategory: String, Sendable {
     case projectArtifacts
     /// Docker's Linux VM disk images.
     case docker
+}
+
+/// How much you lose by trashing a dev item, from safest to riskiest. Used to warn the user
+/// before deletion.
+public enum DevRiskTier: String, Sendable {
+    /// Recreated automatically at no cost beyond build time.
+    case safe
+    /// Comes back on demand, but the next build/install pays with network and time.
+    case costsTime
+    /// Trashing destroys state that is not automatically reproducible.
+    case losesState
+}
+
+extension DevCategory {
+    /// The risk of trashing an item of this category.
+    public var riskTier: DevRiskTier {
+        switch self {
+        case .xcodeBuild:
+            return .safe
+        case .packageCache, .projectArtifacts:
+            return .costsTime
+        case .simulators, .xcodeArchives, .docker:
+            return .losesState
+        }
+    }
+
+    /// One plain-language sentence explaining what happens if an item of this category is trashed.
+    public var consequence: String {
+        switch self {
+        case .xcodeBuild:
+            return "Xcode recreates this as needed: build products return on the next build, device-support symbols re-download when a device connects. You lose only build time."
+        case .packageCache:
+            return "Package managers re-download these on demand. The next install or build needs network and extra time."
+        case .projectArtifacts:
+            return "The project's own tooling regenerates this (npm install, cargo build, …) the next time you build. Only worth deleting for projects you are not actively using."
+        case .simulators:
+            return "Xcode recreates simulator devices, but apps installed on them and their data are gone for good."
+        case .xcodeArchives:
+            return "Archives hold the debug symbols (dSYMs) of your released builds — without them crash reports from those builds cannot be symbolicated. They cannot be regenerated."
+        case .docker:
+            return "Docker's VM disk holds all local images, containers, and volumes. Re-pullable images come back; anything not pushed elsewhere is gone."
+        }
+    }
 }
 
 /// The set of rules that identify developer-reclaimable items in a scanned tree.
@@ -60,7 +107,7 @@ public struct DevItemCatalog {
         // Home-relative location → category. Turned into absolute paths below.
         let relative: [(String, DevCategory)] = [
             ("Library/Developer/Xcode/DerivedData", .xcodeBuild),
-            ("Library/Developer/Xcode/Archives", .xcodeBuild),
+            ("Library/Developer/Xcode/Archives", .xcodeArchives),
             ("Library/Developer/Xcode/UserData/Previews", .xcodeBuild),
             ("Library/Developer/CoreSimulator/Devices", .simulators),
             ("Library/Developer/CoreSimulator/Caches", .simulators),

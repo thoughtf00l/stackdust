@@ -75,6 +75,17 @@ final class DevSelectionTests: XCTestCase {
         XCTAssertEqual(parsed, [.packageCache, .xcodeBuild])
     }
 
+    func testCategoryParseAcceptsXcodeArchives() throws {
+        XCTAssertEqual(try Categories.parse("xcodeArchives"), [.xcodeArchives])
+    }
+
+    func testValidValuesListIncludesXcodeArchives() {
+        XCTAssertTrue(
+            Categories.validValuesList.contains("xcodeArchives"),
+            "xcodeArchives must appear in help/error text"
+        )
+    }
+
     func testCategoryParseRejectsUnknownValue() {
         XCTAssertThrowsError(try Categories.parse("packageCache,bogus")) { error in
             let cliError = error as? CLIError
