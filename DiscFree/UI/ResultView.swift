@@ -116,7 +116,7 @@ struct ResultView: View {
             Button("Move to Trash", role: .destructive) { model.confirmTrash() }
             Button("Cancel", role: .cancel) { model.cancelTrash() }
         } message: { node in
-            Text("“\(node.displayName)” (\(byteString(node.allocatedSize))) will be moved to the Trash.")
+            Text(trashMessage(for: node))
         }
         .alert(
             "Couldn’t Move to Trash",
@@ -134,6 +134,17 @@ struct ResultView: View {
 
     private var displayModeBinding: Binding<DisplayMode> {
         Binding(get: { model.displayMode }, set: { model.displayMode = $0 })
+    }
+
+    /// The Move-to-Trash prompt. For a dev-item root, the category's consequence is appended
+    /// after a blank line so the user sees what deleting it costs; non-dev nodes get the base
+    /// message only.
+    private func trashMessage(for node: FileNode) -> String {
+        let base = "“\(node.displayName)” (\(byteString(node.allocatedSize))) will be moved to the Trash."
+        if let category = node.devCategory {
+            return base + "\n\n" + category.consequence
+        }
+        return base
     }
 
     private var emptyDevState: some View {

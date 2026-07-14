@@ -86,6 +86,8 @@ private struct ContentsRow: View {
 
             Spacer(minLength: 8)
 
+            riskBadge
+
             shareBar
 
             Text(byteString(row.displaySize))
@@ -111,6 +113,38 @@ private struct ContentsRow: View {
         ZStack(alignment: .leading) {
             Capsule().fill(.quaternary).frame(width: 60, height: 5)
             Capsule().fill(swatch).frame(width: max(1, 60 * share), height: 5)
+        }
+    }
+
+    /// A subdued capsule showing the deletion risk of a dev-item root (only on the root
+    /// itself, not on containers or descendants). Hovering it explains the consequence.
+    @ViewBuilder
+    private var riskBadge: some View {
+        if let category = node.devCategory {
+            let tier = category.riskTier
+            Text(riskLabel(tier))
+                .font(.caption2)
+                .foregroundStyle(riskColor(tier))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(riskColor(tier).opacity(0.18)))
+                .help(category.consequence)
+        }
+    }
+
+    private func riskLabel(_ tier: DevRiskTier) -> String {
+        switch tier {
+        case .safe: return "Safe"
+        case .costsTime: return "Costs time"
+        case .losesState: return "Loses data"
+        }
+    }
+
+    private func riskColor(_ tier: DevRiskTier) -> Color {
+        switch tier {
+        case .safe: return .green
+        case .costsTime: return .yellow
+        case .losesState: return .orange
         }
     }
 
