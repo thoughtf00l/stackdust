@@ -152,7 +152,7 @@ struct ReclaimView: View {
                 }
             }
             .listStyle(.inset)
-            .scrollContentBackground(themeStore.selected.hasThemedSurfaces ? .hidden : .automatic)
+            .scrollContentBackground(.hidden)
 
             Divider()
             footer

@@ -28,7 +28,7 @@ struct ThemeSettingsView: View {
         } else if let surface = store.selected.surface {
             AnyShapeStyle(surface.color)
         } else {
-            AnyShapeStyle(.windowBackground)
+            AnyShapeStyle(Color(nsColor: store.selected.systemTintedBackground))
         }
     }
 
@@ -50,7 +50,7 @@ struct ThemeSettingsView: View {
             }
         }
         .listStyle(.sidebar)
-        .scrollContentBackground(store.selected.hasThemedSurfaces ? .hidden : .automatic)
+        .scrollContentBackground(.hidden)
     }
 
     private var selectionBinding: Binding<String?> {

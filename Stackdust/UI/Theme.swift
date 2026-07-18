@@ -126,6 +126,18 @@ struct Theme: Codable, Equatable, Identifiable, Sendable {
             ? background.blended(toward: white, fraction: 0.06)
             : background.blended(toward: white, fraction: 0.55)
     }
+
+    /// System-mode window background: the standard window background washed with a hint of
+    /// the theme accent, so a system-following theme still reads as this theme's skin. The
+    /// color is dynamic — it adapts to light and dark appearance like the plain system one.
+    var systemTintedBackground: NSColor {
+        let accentColor = NSColor(srgbRed: accent.red, green: accent.green,
+                                  blue: accent.blue, alpha: 1)
+        return NSColor(name: nil) { _ in
+            NSColor.windowBackgroundColor.blended(withFraction: 0.05, of: accentColor)
+                ?? .windowBackgroundColor
+        }
+    }
 }
 
 /// Applies the theme to a presented sheet: elevated surface background (color or glass
@@ -143,7 +155,7 @@ struct ThemedPresentation: ViewModifier {
         } else if let surface = theme.surface {
             themed.presentationBackground(surface.color)
         } else {
-            themed
+            themed.presentationBackground(Color(nsColor: theme.systemTintedBackground))
         }
     }
 }

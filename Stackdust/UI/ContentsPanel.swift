@@ -68,7 +68,10 @@ struct ContentsPanel: View {
             }
         }
         .listStyle(.inset)
-        .scrollContentBackground(themeStore.selected.hasThemedSurfaces ? .hidden : .automatic)
+        // Always transparent: the window background (theme color, glass, or accent-washed
+        // system) is the single surface everywhere; the List's own opaque background would
+        // sit on it as a mismatched patch.
+        .scrollContentBackground(.hidden)
     }
 
     /// Row hover highlight, matched by node identity. The synthetic "Other" row has no node, so it

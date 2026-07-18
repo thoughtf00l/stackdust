@@ -48,7 +48,7 @@ struct ContentView: View {
         } else if let background = themeStore.selected.background {
             AnyShapeStyle(background.color)
         } else {
-            AnyShapeStyle(.windowBackground)
+            AnyShapeStyle(Color(nsColor: themeStore.selected.systemTintedBackground))
         }
     }
 }
