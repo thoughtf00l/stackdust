@@ -41,14 +41,18 @@ install, so it opens without a Gatekeeper prompt.
 
 ### Manual download
 
-Download `Stackdust.zip` from the [latest release](https://github.com/thoughtf00l/stackdust/releases/latest),
-unzip it into `/Applications`, then either allow the app in
+Download [`Stackdust.dmg`](https://github.com/thoughtf00l/stackdust/releases/latest/download/Stackdust.dmg)
+(or from [stackdust.app](https://stackdust.app)), open it, and drag Stackdust
+to Applications. On first launch either allow the app in
 System Settings → Privacy & Security → **Open Anyway**, or clear the
 quarantine flag yourself:
 
 ```sh
 xattr -d com.apple.quarantine /Applications/Stackdust.app
 ```
+
+After that, the app keeps itself current: check from the app menu
+(**Check for Updates…**) or let it check automatically.
 
 ### Build from source
 
