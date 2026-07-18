@@ -105,6 +105,12 @@ struct Theme: Codable, Equatable, Identifiable, Sendable {
 
     var isGlass: Bool { glass == true }
 
+    /// The glass-mode window/sheet material. Light appearance needs a heavier material: the
+    /// thin one passes so much wallpaper through that the window is neither light nor legible.
+    nonisolated static func glassMaterial(for scheme: ColorScheme) -> AnyShapeStyle {
+        scheme == .light ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(.ultraThinMaterial)
+    }
+
     /// Whether the theme paints its own surfaces (color or glass) — views with opaque system
     /// backgrounds hide them in that case.
     var hasThemedSurfaces: Bool { isGlass || background != nil }
@@ -145,13 +151,14 @@ struct Theme: Codable, Equatable, Identifiable, Sendable {
 /// the system.
 struct ThemedPresentation: ViewModifier {
     let theme: Theme
+    @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
         let themed = content
             .tint(theme.accent.color)
             .preferredColorScheme(theme.colorScheme)
         if theme.isGlass {
-            themed.presentationBackground(.ultraThinMaterial)
+            themed.presentationBackground(Theme.glassMaterial(for: colorScheme))
         } else if let surface = theme.surface {
             themed.presentationBackground(surface.color)
         } else {

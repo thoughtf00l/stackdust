@@ -44,7 +44,7 @@ struct ContentView: View {
 
     private var backgroundStyle: AnyShapeStyle {
         if themeStore.selected.isGlass {
-            AnyShapeStyle(.ultraThinMaterial)
+            Theme.glassMaterial(for: colorScheme)
         } else if let background = themeStore.selected.background {
             AnyShapeStyle(background.color)
         } else {

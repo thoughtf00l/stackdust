@@ -5,6 +5,7 @@ import SwiftUI
 /// renamed and deleted. All edits apply to the chart immediately.
 struct ThemeSettingsView: View {
     let store: ThemeStore
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: 0) {
@@ -24,7 +25,7 @@ struct ThemeSettingsView: View {
 
     private var surfaceStyle: AnyShapeStyle {
         if store.selected.isGlass {
-            AnyShapeStyle(.ultraThinMaterial)
+            Theme.glassMaterial(for: colorScheme)
         } else if let surface = store.selected.surface {
             AnyShapeStyle(surface.color)
         } else {
