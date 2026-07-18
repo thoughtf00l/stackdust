@@ -189,6 +189,29 @@
 
 <section>
   <div class="wrap">
+    <h2>For CLI lovers and agents.</h2>
+    <p class="lead">Claude, Codex, or a cron job — <code>stackdust</code> treats programs as first-class users: JSON everywhere, stable exit codes, never interactive, and a dry-run-by-default cleanup that physically cannot delete permanently.</p>
+    <div class="term">
+      <div class="term-bar"><i></i><i></i><i></i></div>
+      <pre><span class="p">❯</span> <span class="c">stackdust dev ~ --json</span>
+{<span class="k">"items"</span>: [
+  {<span class="k">"path"</span>: <span class="m">"~/Library/Developer/Xcode/DerivedData"</span>, <span class="k">"category"</span>: <span class="m">"xcodeBuild"</span>, <span class="k">"risk"</span>: <span class="m">"safe"</span>, <span class="k">"bytes"</span>: 38214592512},
+  {<span class="k">"path"</span>: <span class="m">"~/Library/Developer/CoreSimulator/Devices"</span>, <span class="k">"category"</span>: <span class="m">"simulators"</span>, <span class="k">"risk"</span>: <span class="m">"loses_state"</span>, <span class="k">"bytes"</span>: 21474836480},
+  <span class="m">…</span>
+], <span class="k">"total_bytes"</span>: 96636764160}
+
+<span class="p">❯</span> <span class="c">stackdust clean ~ --category xcodeBuild,packageCache --min-size 1G --yes</span>
+<span class="m">Moved 14 items (61.3 GB) to the Trash.</span></pre>
+    </div>
+    <div class="risk">
+      <span class="pill"><i style="background:var(--green)"></i><b>safe</b> — regenerates at build time</span>
+      <span class="pill"><i style="background:var(--yellow)"></i><b>costs_time</b> — comes back on demand</span>
+      <span class="pill"><i style="background:var(--pink)"></i><b>loses_state</b> — asks a human first</span>
+    </div>
+  </div>
+</section>
+<section>
+  <div class="wrap">
     <h2>A UI for humans.</h2>
     <p class="lead">One scan draws your disk as a sunburst — every ring a directory level, every arc sized by what it actually takes on disk. The Reclaim pane groups dev junk by category and honest risk tier, and cleanup only ever means <em>move to Trash</em>.</p>
     <!-- No-JS fallback: both windows side by side. Hidden when the scroll showcase runs. -->
@@ -220,29 +243,6 @@
   </div>
 </section>
 
-<section>
-  <div class="wrap">
-    <h2>For CLI lovers and agents.</h2>
-    <p class="lead">Claude, Codex, or a cron job — <code>stackdust</code> treats programs as first-class users: JSON everywhere, stable exit codes, never interactive, and a dry-run-by-default cleanup that physically cannot delete permanently.</p>
-    <div class="term">
-      <div class="term-bar"><i></i><i></i><i></i></div>
-      <pre><span class="p">❯</span> <span class="c">stackdust dev ~ --json</span>
-{<span class="k">"items"</span>: [
-  {<span class="k">"path"</span>: <span class="m">"~/Library/Developer/Xcode/DerivedData"</span>, <span class="k">"category"</span>: <span class="m">"xcodeBuild"</span>, <span class="k">"risk"</span>: <span class="m">"safe"</span>, <span class="k">"bytes"</span>: 38214592512},
-  {<span class="k">"path"</span>: <span class="m">"~/Library/Developer/CoreSimulator/Devices"</span>, <span class="k">"category"</span>: <span class="m">"simulators"</span>, <span class="k">"risk"</span>: <span class="m">"loses_state"</span>, <span class="k">"bytes"</span>: 21474836480},
-  <span class="m">…</span>
-], <span class="k">"total_bytes"</span>: 96636764160}
-
-<span class="p">❯</span> <span class="c">stackdust clean ~ --category xcodeBuild,packageCache --min-size 1G --yes</span>
-<span class="m">Moved 14 items (61.3 GB) to the Trash.</span></pre>
-    </div>
-    <div class="risk">
-      <span class="pill"><i style="background:var(--green)"></i><b>safe</b> — regenerates at build time</span>
-      <span class="pill"><i style="background:var(--yellow)"></i><b>costs_time</b> — comes back on demand</span>
-      <span class="pill"><i style="background:var(--pink)"></i><b>loses_state</b> — asks a human first</span>
-    </div>
-  </div>
-</section>
 
 <section id="install">
   <div class="wrap">
