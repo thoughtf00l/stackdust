@@ -17,13 +17,15 @@ struct ThemeSettingsView: View {
         .frame(width: 640, height: 420)
         // The Settings window wears the theme too: surface color, control scheme, accent.
         .background(surfaceStyle, ignoresSafeAreaEdges: .all)
-        .background(TitlebarConfigurator(transparent: store.selected.background != nil))
+        .background(TitlebarConfigurator(transparent: store.selected.hasThemedSurfaces))
         .preferredColorScheme(store.selected.colorScheme)
         .tint(store.selected.accent.color)
     }
 
     private var surfaceStyle: AnyShapeStyle {
-        if let surface = store.selected.surface {
+        if store.selected.isGlass {
+            AnyShapeStyle(.ultraThinMaterial)
+        } else if let surface = store.selected.surface {
             AnyShapeStyle(surface.color)
         } else {
             AnyShapeStyle(.windowBackground)
@@ -48,7 +50,7 @@ struct ThemeSettingsView: View {
             }
         }
         .listStyle(.sidebar)
-        .scrollContentBackground(store.selected.background == nil ? .automatic : .hidden)
+        .scrollContentBackground(store.selected.hasThemedSurfaces ? .hidden : .automatic)
     }
 
     private var selectionBinding: Binding<String?> {
@@ -126,9 +128,10 @@ private struct ThemeDetail: View {
                         .help("Buttons, toggles, and selection highlights")
 
                     HStack {
-                        Picker("Background", selection: backgroundIsCustomBinding) {
-                            Text("System").tag(false)
-                            Text("Custom").tag(true)
+                        Picker("Background", selection: backgroundModeBinding) {
+                            Text("System").tag(BackgroundMode.system)
+                            Text("Custom").tag(BackgroundMode.custom)
+                            Text("Glass").tag(BackgroundMode.glass)
                         }
                         .pickerStyle(.segmented)
                         .fixedSize()
@@ -137,7 +140,7 @@ private struct ThemeDetail: View {
                                 .labelsHidden()
                         }
                     }
-                    .help("Window background; Custom also switches controls to match its darkness")
+                    .help("Window background: system, a custom color (controls match its darkness), or a behind-window glass blur")
                 }
                 .padding(.trailing, 8)
             }
@@ -219,11 +222,22 @@ private struct ThemeDetail: View {
     /// The dark surface from the landing page — the starting point when switching to Custom.
     private static let defaultCustomBackground = ThemeColor(hex: 0x191228)
 
-    private var backgroundIsCustomBinding: Binding<Bool> {
+    private enum BackgroundMode: Hashable {
+        case system, custom, glass
+    }
+
+    private var backgroundModeBinding: Binding<BackgroundMode> {
         Binding(
-            get: { theme.background != nil },
-            set: { custom in
-                store.setBackground(custom ? Self.defaultCustomBackground : nil, for: theme.id)
+            get: {
+                if theme.isGlass { return .glass }
+                return theme.background != nil ? .custom : .system
+            },
+            set: { mode in
+                switch mode {
+                case .system: store.setBackground(nil, for: theme.id)
+                case .custom: store.setBackground(Self.defaultCustomBackground, for: theme.id)
+                case .glass: store.setGlass(true, for: theme.id)
+                }
             }
         )
     }

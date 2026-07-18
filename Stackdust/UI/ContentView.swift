@@ -26,7 +26,7 @@ struct ContentView: View {
         // Custom background paints the whole window (title bar included) and forces the
         // control scheme by its luminance so labels stay readable; nil follows the system.
         .containerBackground(backgroundStyle, for: .window)
-        .background(TitlebarConfigurator(transparent: themeStore.selected.background != nil))
+        .background(TitlebarConfigurator(transparent: themeStore.selected.hasThemedSurfaces))
         .preferredColorScheme(themeStore.selected.colorScheme)
         .environment(themeStore)
         .environment(\.themeBackground, themeStore.selected.background)
@@ -44,7 +44,9 @@ struct ContentView: View {
     }
 
     private var backgroundStyle: AnyShapeStyle {
-        if let background = themeStore.selected.background {
+        if themeStore.selected.isGlass {
+            AnyShapeStyle(.ultraThinMaterial)
+        } else if let background = themeStore.selected.background {
             AnyShapeStyle(background.color)
         } else {
             AnyShapeStyle(.windowBackground)

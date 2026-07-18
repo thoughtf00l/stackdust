@@ -26,6 +26,7 @@ struct ResultView: View {
                 } label: {
                     Label("Reclaim…", systemImage: "arrow.up.trash")
                 }
+                .themedProminentButton(glass: themeStore.selected.isGlass)
                 .fixedSize()
             }
             .padding(.horizontal, 12)
@@ -86,6 +87,7 @@ struct ResultView: View {
                 } label: {
                     Label("New Scan", systemImage: "arrow.left")
                 }
+                .themedSecondaryButton(glass: themeStore.selected.isGlass)
                 if let free = model.freeSpaceBytes {
                     Text("\(byteString(free)) free")
                         .foregroundStyle(.secondary)

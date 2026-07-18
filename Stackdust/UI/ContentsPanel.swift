@@ -16,14 +16,12 @@ struct ContentsPanel: View {
     let onReveal: (FileNode) -> Void
     let onTrash: (FileNode) -> Void
 
-    /// Non-nil when the theme paints a custom window background; the List then hides its own
-    /// opaque background so the color shows through.
-    @Environment(\.themeBackground) private var themeBackground
+    @Environment(ThemeStore.self) private var themeStore
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Mirrors `ContentView.pushTheme`: dark custom color, or system dark mode.
+    /// Mirrors `ContentView.pushTheme`: dark custom color, or system dark mode (glass included).
     private var darkBackground: Bool {
-        themeBackground.map { $0.luminance < 0.5 } ?? (colorScheme == .dark)
+        themeStore.selected.background.map { $0.luminance < 0.5 } ?? (colorScheme == .dark)
     }
 
     var body: some View {
@@ -70,7 +68,7 @@ struct ContentsPanel: View {
             }
         }
         .listStyle(.inset)
-        .scrollContentBackground(themeBackground == nil ? .automatic : .hidden)
+        .scrollContentBackground(themeStore.selected.hasThemedSurfaces ? .hidden : .automatic)
     }
 
     /// Row hover highlight, matched by node identity. The synthetic "Other" row has no node, so it

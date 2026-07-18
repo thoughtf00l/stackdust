@@ -61,6 +61,7 @@ struct StartView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.bordered)
+                        .foregroundStyle(.primary)
                     }
                 }
                 .frame(maxWidth: 420)

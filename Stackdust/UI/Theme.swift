@@ -88,26 +88,39 @@ struct Theme: Codable, Equatable, Identifiable, Sendable {
     /// Main-window background; nil follows the system appearance. A custom color also forces
     /// the window's control scheme (light/dark) by its luminance so labels stay readable.
     var background: ThemeColor?
+    /// Glass mode: the window shows a behind-window blur (and Liquid Glass chrome where the
+    /// OS has it) instead of a color. Wins over `background`. Optional so themes stored
+    /// before the field existed keep decoding.
+    var glass: Bool?
 
     init(id: String, name: String, colors: [ThemeColor], accent: ThemeColor,
-         background: ThemeColor? = nil) {
+         background: ThemeColor? = nil, glass: Bool? = nil) {
         self.id = id
         self.name = name
         self.colors = colors
         self.accent = accent
         self.background = background
+        self.glass = glass
     }
 
-    /// The control scheme a custom background needs; nil when following the system.
+    var isGlass: Bool { glass == true }
+
+    /// Whether the theme paints its own surfaces (color or glass) — views with opaque system
+    /// backgrounds hide them in that case.
+    var hasThemedSurfaces: Bool { isGlass || background != nil }
+
+    /// The control scheme a custom background needs; nil when following the system (glass
+    /// adapts to the system scheme too).
     var colorScheme: ColorScheme? {
-        background.map { $0.luminance < 0.5 ? .dark : .light }
+        guard !isGlass else { return nil }
+        return background.map { $0.luminance < 0.5 ? .dark : .light }
     }
 
     /// Elevated-surface color for sheets and auxiliary windows, derived from the background
     /// (slightly lifted toward white on dark themes, near-white on light ones); nil when the
-    /// theme follows the system.
+    /// theme follows the system or uses glass (those surfaces use materials).
     var surface: ThemeColor? {
-        guard let background else { return nil }
+        guard !isGlass, let background else { return nil }
         let white = ThemeColor(red: 1, green: 1, blue: 1)
         return background.luminance < 0.5
             ? background.blended(toward: white, fraction: 0.06)
@@ -115,8 +128,9 @@ struct Theme: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-/// Applies the theme to a presented sheet: elevated surface background, the theme's control
-/// scheme, and its accent. A no-op for themes that follow the system.
+/// Applies the theme to a presented sheet: elevated surface background (color or glass
+/// material), the theme's control scheme, and its accent. A no-op for themes that follow
+/// the system.
 struct ThemedPresentation: ViewModifier {
     let theme: Theme
 
@@ -124,10 +138,36 @@ struct ThemedPresentation: ViewModifier {
         let themed = content
             .tint(theme.accent.color)
             .preferredColorScheme(theme.colorScheme)
-        if let surface = theme.surface {
+        if theme.isGlass {
+            themed.presentationBackground(.ultraThinMaterial)
+        } else if let surface = theme.surface {
             themed.presentationBackground(surface.color)
         } else {
             themed
+        }
+    }
+}
+
+extension View {
+    /// Primary-action chrome: accent-filled, or Liquid Glass on a glass theme where the OS
+    /// has it (macOS 26+).
+    @ViewBuilder
+    func themedProminentButton(glass: Bool) -> some View {
+        if glass, #available(macOS 26.0, *) {
+            buttonStyle(.glassProminent)
+        } else {
+            buttonStyle(.borderedProminent)
+        }
+    }
+
+    /// Secondary-action chrome: neutral bordered (label in primary color, not accent —
+    /// accent-tinted labels sink into themed backgrounds), or Liquid Glass on a glass theme.
+    @ViewBuilder
+    func themedSecondaryButton(glass: Bool) -> some View {
+        if glass, #available(macOS 26.0, *) {
+            buttonStyle(.glass)
+        } else {
+            buttonStyle(.bordered).foregroundStyle(.primary)
         }
     }
 }
@@ -149,6 +189,7 @@ final class ThemeStore {
         var colors: [ThemeColor]
         var accent: ThemeColor
         var background: ThemeColor?
+        var glass: Bool?
     }
 
     /// The landing page's five accent colors, shared by the themes that keep its look.
@@ -170,6 +211,10 @@ final class ThemeStore {
               colors: siteColors,
               accent: ThemeColor(hex: 0x8D41FF),
               background: ThemeColor(hex: 0x191228)),
+        Theme(id: "glass", name: "Glass",
+              colors: siteColors,
+              accent: ThemeColor(hex: 0x8D41FF),
+              glass: true),
         Theme(id: "classic", name: "Classic",
               colors: (0..<10).map {
                   ThemeColor(hue: Double($0) / 10, saturation: 0.80, brightness: 0.70)
@@ -248,6 +293,7 @@ final class ThemeStore {
         resolved.colors = override.colors
         resolved.accent = override.accent
         resolved.background = override.background
+        resolved.glass = override.glass
         return resolved
     }
 
@@ -285,9 +331,20 @@ final class ThemeStore {
         mutate(id) { $0.accent = color }
     }
 
-    /// nil returns the theme to the system window background.
+    /// nil returns the theme to the system window background. Setting a color leaves glass.
     func setBackground(_ color: ThemeColor?, for id: String) {
-        mutate(id) { $0.background = color }
+        mutate(id) {
+            $0.background = color
+            $0.glass = nil
+        }
+    }
+
+    /// Switches the theme to (or from) the behind-window glass background.
+    func setGlass(_ on: Bool, for id: String) {
+        mutate(id) {
+            $0.glass = on ? true : nil
+            if on { $0.background = nil }
+        }
     }
 
     /// Renames a custom theme; built-in names are fixed.
@@ -331,7 +388,7 @@ final class ThemeStore {
             var theme = resolveBuiltIn(builtIn)
             edit(&theme)
             overrides[id] = Override(colors: theme.colors, accent: theme.accent,
-                                     background: theme.background)
+                                     background: theme.background, glass: theme.glass)
         } else if let index = customThemes.firstIndex(where: { $0.id == id }) {
             edit(&customThemes[index])
         } else {
