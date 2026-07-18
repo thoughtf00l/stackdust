@@ -73,14 +73,23 @@ APP=.build/xcode/Build/Products/Release/Stackdust.app
 
 # --- verify before packaging --------------------------------------------------
 echo "==> Verifying $APP"
-short=$(defaults read "$PWD/$APP/Contents/Info" CFBundleShortVersionString)
-bundle_version=$(defaults read "$PWD/$APP/Contents/Info" CFBundleVersion)
-feed=$(defaults read "$PWD/$APP/Contents/Info" SUFeedURL)
-ed_key=$(defaults read "$PWD/$APP/Contents/Info" SUPublicEDKey)
+# PlistBuddy, not `defaults read`: cfprefsd caches plists by path and can serve
+# stale values for rebuilt bundles.
+plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist"; }
+short=$(plist CFBundleShortVersionString)
+bundle_version=$(plist CFBundleVersion)
+feed=$(plist SUFeedURL)
+ed_key=$(plist SUPublicEDKey)
 [ "$short" = "$VERSION" ] || { echo "CFBundleShortVersionString is $short, expected $VERSION" >&2; exit 1; }
 [ "$bundle_version" = "$VERSION" ] || { echo "CFBundleVersion is $bundle_version, expected $VERSION" >&2; exit 1; }
 [ -n "$feed" ] && [ -n "$ed_key" ] || { echo "Sparkle keys missing from Info.plist" >&2; exit 1; }
-codesign -dv "$APP" 2>&1 | grep -q "TeamIdentifier=$TEAM" || { echo "app is not signed by team $TEAM" >&2; exit 1; }
+# capture instead of piping into grep: pipefail turns grep -q's early exit
+# (SIGPIPE to codesign) into a spurious failure
+signature=$(codesign -dv "$APP" 2>&1)
+case "$signature" in
+    *"TeamIdentifier=$TEAM"*) ;;
+    *) echo "app is not signed by team $TEAM:" >&2; echo "$signature" >&2; exit 1 ;;
+esac
 codesign --verify --deep --strict "$APP" || { echo "code signature verification failed" >&2; exit 1; }
 
 # --- package ------------------------------------------------------------------
