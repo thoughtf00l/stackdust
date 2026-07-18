@@ -72,8 +72,8 @@ final class SunburstLayoutTests: XCTestCase {
     /// highlighting off every fraction is forced to 1 so `color` renders the full branch color.
     func testHighlightPreservesGeometryAndForcesFullColorWhenOff() {
         let f = classifiedFixture()
-        let plain = SunburstLayout.build(focus: f.focus, highlight: false)
-        let highlight = SunburstLayout.build(focus: f.focus, highlight: true)
+        let plain = SunburstLayout.build(focus: f.focus, highlight: false, palette: ThemeStore.defaultPalette)
+        let highlight = SunburstLayout.build(focus: f.focus, highlight: true, palette: ThemeStore.defaultPalette)
 
         XCTAssertEqual(plain.count, highlight.count)
         for node in [f.nodeModules, f.proj, f.notes, f.dep1, f.dep2, f.innerNM, f.srcJS] {
@@ -89,7 +89,7 @@ final class SunburstLayoutTests: XCTestCase {
     /// descendants, `devSize / allocatedSize` for a container, 0 for clean content.
     func testHighlightFractionsReflectReclaimableShare() {
         let f = classifiedFixture()
-        let segments = SunburstLayout.build(focus: f.focus, highlight: true)
+        let segments = SunburstLayout.build(focus: f.focus, highlight: true, palette: ThemeStore.defaultPalette)
 
         // Dev item → exactly 1, and so is every descendant inside it.
         XCTAssertEqual(try! XCTUnwrap(segment(for: f.nodeModules, in: segments)).reclaimableFraction,
@@ -120,7 +120,7 @@ final class SunburstLayoutTests: XCTestCase {
         let focus = dir("/work", [container, clean])
 
         DevClassifier.classify(focus, using: catalog)
-        let segments = SunburstLayout.build(focus: focus, highlight: true)
+        let segments = SunburstLayout.build(focus: focus, highlight: true, palette: ThemeStore.defaultPalette)
 
         // The container is not itself a dev item, but its reclaimable share (200 / 1000)
         // tints it between gray and full color.
@@ -150,7 +150,7 @@ final class SunburstLayoutTests: XCTestCase {
         let focus = dir("/work", [container, plain])
 
         DevClassifier.classify(focus, using: catalog)
-        let segments = SunburstLayout.build(focus: focus, highlight: true)
+        let segments = SunburstLayout.build(focus: focus, highlight: true, palette: ThemeStore.defaultPalette)
 
         // A container of a dev item is not itself dev. Here its content is entirely reclaimable
         // (devSize == allocatedSize), so its fraction is 1.
@@ -186,7 +186,7 @@ final class SunburstLayoutTests: XCTestCase {
         let tiny = (0..<50).map { file("tiny\($0)", 1) }           // each 1 B, well under 0.1%
         let focus = dir("/work", [big1, big2] + tiny)              // total 220_050
 
-        let segments = SunburstLayout.build(focus: focus, highlight: false)
+        let segments = SunburstLayout.build(focus: focus, highlight: false, palette: ThemeStore.defaultPalette)
 
         let others = segments.filter(\.isOther)
         XCTAssertEqual(others.count, 1, "the whole tail collapses to a single wedge")
@@ -228,7 +228,7 @@ final class SunburstLayoutTests: XCTestCase {
         let tiny = file("tiny", 1)
         let focus = dir("/work", [big1, big2, tiny])
 
-        let segments = SunburstLayout.build(focus: focus, highlight: false)
+        let segments = SunburstLayout.build(focus: focus, highlight: false, palette: ThemeStore.defaultPalette)
         XCTAssertTrue(segments.allSatisfy { !$0.isOther }, "no synthetic wedge for a single tiny entry")
         XCTAssertTrue(segments.allSatisfy { $0.node != nil })
 
@@ -251,13 +251,13 @@ final class SunburstLayoutTests: XCTestCase {
         let cleanB = file("cleanB", 10)           // devSize 0
         let focus = dir("/work", [big1, big2, devA, devB, cleanA, cleanB])
 
-        let highlighted = SunburstLayout.build(focus: focus, highlight: true)
+        let highlighted = SunburstLayout.build(focus: focus, highlight: true, palette: ThemeStore.defaultPalette)
         let other = try! XCTUnwrap(highlighted.first(where: \.isOther))
         XCTAssertNil(other.node)
         XCTAssertEqual(other.reclaimableFraction, 0.5, accuracy: 1e-9)
 
         // Highlighting off forces the fraction to 1, like every other segment.
-        let plain = SunburstLayout.build(focus: focus, highlight: false)
+        let plain = SunburstLayout.build(focus: focus, highlight: false, palette: ThemeStore.defaultPalette)
         let plainOther = try! XCTUnwrap(plain.first(where: \.isOther))
         XCTAssertEqual(plainOther.reclaimableFraction, 1, accuracy: 1e-9)
     }
@@ -270,7 +270,7 @@ final class SunburstLayoutTests: XCTestCase {
         let f = classifiedFixture()
 
         // Highlight on: each row's fraction equals its matching depth-1 segment's fraction.
-        let segments = SunburstLayout.build(focus: f.focus, highlight: true)
+        let segments = SunburstLayout.build(focus: f.focus, highlight: true, palette: ThemeStore.defaultPalette)
         let rows = SunburstLayout.rows(focus: f.focus, highlight: true)
         for row in rows {
             let node = try! XCTUnwrap(row.node)            // this fixture has no "Other" row
@@ -299,7 +299,7 @@ final class SunburstLayoutTests: XCTestCase {
         let cleanB = file("cleanB", 10)
         let focus = dir("/work", [big1, big2, devA, devB, cleanA, cleanB])
 
-        let segments = SunburstLayout.build(focus: focus, highlight: true)
+        let segments = SunburstLayout.build(focus: focus, highlight: true, palette: ThemeStore.defaultPalette)
         let rows = SunburstLayout.rows(focus: focus, highlight: true)
         let otherWedge = try! XCTUnwrap(segments.first(where: \.isOther))
         let otherRow = try! XCTUnwrap(rows.first(where: \.isOther))

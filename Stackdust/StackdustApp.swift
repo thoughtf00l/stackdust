@@ -9,9 +9,12 @@ struct StackdustApp: App {
         startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil
     )
 
+    /// Shared between the main window (chart colors) and the Settings scene (editing).
+    @State private var themeStore = ThemeStore()
+
     var body: some Scene {
         Window("Stackdust", id: "main") {
-            ContentView()
+            ContentView(themeStore: themeStore)
         }
         .defaultSize(width: 900, height: 680)
         .windowResizability(.contentMinSize)
@@ -19,6 +22,10 @@ struct StackdustApp: App {
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: updaterController.updater)
             }
+        }
+
+        Settings {
+            ThemeSettingsView(store: themeStore)
         }
     }
 }

@@ -5,6 +5,9 @@ import StackdustCore
 struct ContentsPanel: View {
     let focusTotal: Int64
     let rows: [ContentsPanelRow]
+    /// The active theme's branch colors; row swatches cycle through it by row index, matching
+    /// the sunburst's depth-1 wedge colors.
+    let palette: [ThemeColor]
     /// While a foreground scan is still running the tree is mutating and sizes are lower bounds,
     /// so the Move-to-Trash affordance is hidden (the model guards it too).
     let scanActive: Bool
@@ -19,7 +22,8 @@ struct ContentsPanel: View {
                 let content = ContentsRow(
                     row: row,
                     focusTotal: focusTotal,
-                    hue: rows.count > 0 ? Double(index) / Double(rows.count) : 0,
+                    base: palette.isEmpty ? ThemeColor(hue: 0, saturation: 0, brightness: 0.7)
+                                          : palette[index % palette.count],
                     isHovered: isRowHovered(row)
                 )
                 .contentShape(Rectangle())
@@ -68,7 +72,7 @@ struct ContentsPanel: View {
 private struct ContentsRow: View {
     let row: ContentsPanelRow
     let focusTotal: Int64
-    let hue: Double
+    let base: ThemeColor
     let isHovered: Bool
 
     private var share: Double {
@@ -86,8 +90,13 @@ private struct ContentsRow: View {
         if row.isOther { return Color(white: 0.6) }  // neutral gray, matching the "Other" wedge
         if isUnreadableLike { return Color(white: 0.55) }
         // Same blend as the matching sunburst wedge: full color when highlighting is off
-        // (fraction 1), desaturated toward gray by its reclaimable share when on.
-        return SunburstSegment.tint(hue: hue, saturation: 0.7, brightness: 0.82,
+        // (fraction 1), desaturated toward gray by its reclaimable share when on. The swatch
+        // ramp mirrors the wedge ramp's shape (slightly brighter, less saturated than depth 1);
+        // for the Classic palette it reproduces the pre-theme fixed 0.7/0.82 exactly.
+        let hsb = base.hsb
+        return SunburstSegment.tint(hue: hsb.hue,
+                                    saturation: max(0.25, hsb.saturation - 0.10),
+                                    brightness: min(1.0, hsb.brightness + 0.12),
                                     fraction: row.reclaimableFraction)
     }
 

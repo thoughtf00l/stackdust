@@ -62,6 +62,7 @@ struct ResultView: View {
                     ContentsPanel(
                         focusTotal: model.focusDisplayTotal,
                         rows: model.rows,
+                        palette: model.themePalette,
                         scanActive: model.scanActive,
                         hovered: $hovered,
                         onDrill: { model.drill(into: $0) },

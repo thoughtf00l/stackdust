@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    let themeStore: ThemeStore
     @State private var model = AppModel()
 
     var body: some View {
@@ -17,10 +18,14 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 720, minHeight: 560)
+        .tint(themeStore.selected.accent.color)
+        .onChange(of: themeStore.selected, initial: true) { _, theme in
+            model.themePalette = theme.colors
+        }
         .task { model.attemptResume() }
     }
 }
 
 #Preview {
-    ContentView()
+    ContentView(themeStore: ThemeStore())
 }

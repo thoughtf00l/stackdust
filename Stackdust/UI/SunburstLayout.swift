@@ -109,7 +109,9 @@ enum SunburstLayout {
     static let maxDepth = 5
     static let minAngle = 0.5 * Double.pi / 180  // 0.5° — below this a slice is invisible
 
-    static func build(focus: FileNode, highlight: Bool) -> [SunburstSegment] {
+    static func build(
+        focus: FileNode, highlight: Bool, palette: [ThemeColor]
+    ) -> [SunburstSegment] {
         var segments: [SunburstSegment] = []
         guard let children = focus.children else { return segments }
 
@@ -119,24 +121,27 @@ enum SunburstLayout {
         let total = focus.allocatedSize
         guard total > 0 else { return segments }
 
-        // Depth 1 fills the full circle; each included top-level branch gets a distinct hue.
+        // Never index into an empty palette; a lone neutral gray keeps the chart legible.
+        let palette = palette.isEmpty
+            ? [ThemeColor(hue: 0, saturation: 0, brightness: 0.7)] : palette
+
+        // Depth 1 fills the full circle; each drawn top-level branch takes the next palette
+        // color, cycling. The panel colors its rows by the same head index, so a node's wedge
+        // and its row always match.
         let entries = sortedEntries(of: children, parentIsDev: focusIsDev)
         let (head, tail) = splitTail(entries, focusTotal: total)
-        // Hue is assigned per drawn depth-1 slot; the panel colors its rows the same way, so the
-        // denominator must match the panel row count (head entries + one "Other" row when grouping).
-        let branchCount = head.count + (tail.isEmpty ? 0 : 1)
         var cursor = 0.0
         for (index, entry) in head.enumerated() {
             let extent = 2 * Double.pi * Double(entry.size) / Double(total)
             let start = cursor
             cursor += extent
             guard extent >= minAngle else { continue }  // consume the angle, skip the sliver
-            let hue = branchCount > 0 ? Double(index) / Double(branchCount) : 0
-            append(entry.node, depth: 1, start: start, end: cursor, hue: hue,
+            let base = palette[index % palette.count]
+            append(entry.node, depth: 1, start: start, end: cursor, base: base,
                    isDev: entry.isDev, fraction: entry.fraction, highlight: highlight,
                    into: &segments)
             recurse(entry.node, depth: 2, start: start, end: cursor,
-                    hue: hue, nodeIsDev: entry.isDev, focusTotal: total, highlight: highlight,
+                    base: base, nodeIsDev: entry.isDev, focusTotal: total, highlight: highlight,
                     into: &segments)
         }
         // The grouped tail fills the ring from where the drawn head ended to the full circle,
@@ -184,7 +189,7 @@ enum SunburstLayout {
 
     private static func recurse(
         _ node: FileNode, depth: Int, start: Double, end: Double,
-        hue: Double, nodeIsDev: Bool, focusTotal: Int64, highlight: Bool,
+        base: ThemeColor, nodeIsDev: Bool, focusTotal: Int64, highlight: Bool,
         into segments: inout [SunburstSegment]
     ) {
         guard depth <= maxDepth, let children = node.children else { return }
@@ -200,11 +205,11 @@ enum SunburstLayout {
             let childStart = cursor
             cursor += extent
             guard extent >= minAngle else { continue }
-            append(entry.node, depth: depth, start: childStart, end: cursor, hue: hue,
+            append(entry.node, depth: depth, start: childStart, end: cursor, base: base,
                    isDev: entry.isDev, fraction: entry.fraction, highlight: highlight,
                    into: &segments)
             recurse(entry.node, depth: depth + 1, start: childStart, end: cursor,
-                    hue: hue, nodeIsDev: entry.isDev, focusTotal: focusTotal, highlight: highlight,
+                    base: base, nodeIsDev: entry.isDev, focusTotal: focusTotal, highlight: highlight,
                     into: &segments)
         }
         if !tail.isEmpty {
@@ -214,12 +219,15 @@ enum SunburstLayout {
     }
 
     private static func append(
-        _ node: FileNode, depth: Int, start: Double, end: Double, hue: Double,
+        _ node: FileNode, depth: Int, start: Double, end: Double, base: ThemeColor,
         isDev: Bool, fraction: Double, highlight: Bool, into segments: inout [SunburstSegment]
     ) {
-        // Outer rings get lighter, less saturated shades of the branch hue.
-        let saturation = max(0.28, 0.80 - Double(depth - 1) * 0.11)
-        let brightness = min(0.97, 0.70 + Double(depth - 1) * 0.06)
+        // Outer rings get lighter, less saturated shades of the branch color. The ramp is
+        // relative to the palette color's own saturation/brightness; for the Classic theme
+        // (s 0.80, b 0.70) it reproduces the pre-theme absolute ramp exactly.
+        let hsb = base.hsb
+        let saturation = max(0.25, hsb.saturation - Double(depth - 1) * 0.11)
+        let brightness = min(0.97, hsb.brightness + Double(depth - 1) * 0.06)
         segments.append(
             SunburstSegment(
                 id: segments.count,
@@ -229,7 +237,7 @@ enum SunburstLayout {
                 depth: depth,
                 startAngle: start,
                 endAngle: end,
-                hue: hue,
+                hue: hsb.hue,
                 saturation: saturation,
                 brightness: brightness,
                 // Evicted (iCloud) directories render exactly like unreadable ones — gray, no new

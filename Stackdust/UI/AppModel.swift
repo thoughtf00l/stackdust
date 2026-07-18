@@ -42,6 +42,15 @@ final class AppModel {
         }
     }
 
+    /// The active theme's branch colors, pushed in by the UI whenever the selected theme (or its
+    /// edited colors) changes. Segment colors are baked into the layout, so a change recomputes it.
+    var themePalette: [ThemeColor] = ThemeStore.defaultPalette {
+        didSet {
+            guard themePalette != oldValue, let focus else { return }
+            rebuild(for: focus)
+        }
+    }
+
     /// Current focus (center of the sunburst). Changing it recomputes the layout.
     private(set) var focus: FileNode?
 
@@ -321,10 +330,12 @@ final class AppModel {
     private func rebuild(for node: FileNode) {
         layoutTask?.cancel()
         let highlight = highlightReclaimable
+        let palette = themePalette
         layoutTask = Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
                 () -> (segments: [SunburstSegment], rows: [ContentsPanelRow], total: Int64) in
-                let segments = SunburstLayout.build(focus: node, highlight: highlight)
+                let segments = SunburstLayout.build(focus: node, highlight: highlight,
+                                                    palette: palette)
                 let rows = SunburstLayout.rows(focus: node, highlight: highlight)
                 let total = SunburstLayout.focusDisplayTotal(focus: node)
                 return (segments, rows, total)
