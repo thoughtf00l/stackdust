@@ -27,6 +27,7 @@ struct ContentView: View {
         // control scheme by its luminance so labels stay readable; nil follows the system.
         .containerBackground(backgroundStyle, for: .window)
         .preferredColorScheme(themeStore.selected.colorScheme)
+        .environment(themeStore)
         .environment(\.themeBackground, themeStore.selected.background)
         .onChange(of: themeStore.selected, initial: true) { pushTheme() }
         .onChange(of: colorScheme) { pushTheme() }

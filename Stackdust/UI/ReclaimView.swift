@@ -7,6 +7,10 @@ import StackdustCore
 struct ReclaimView: View {
     let model: AppModel
 
+    /// Non-nil when the theme paints custom surfaces; the List then hides its own opaque
+    /// background so the sheet's themed presentation shows through.
+    @Environment(\.themeBackground) private var themeBackground
+
     /// Categories the user has expanded to reveal their hidden tail. A group with more than
     /// `collapsedItemLimit` items shows only its largest `collapsedItemLimit` until expanded.
     @State private var expandedCategories: Set<DevCategory> = []
@@ -148,6 +152,7 @@ struct ReclaimView: View {
                 }
             }
             .listStyle(.inset)
+            .scrollContentBackground(themeBackground == nil ? .automatic : .hidden)
 
             Divider()
             footer

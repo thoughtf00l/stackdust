@@ -51,6 +51,14 @@ struct ThemeColor: Codable, Equatable, Sendable {
     /// a light or dark control scheme over this color).
     var luminance: Double { 0.2126 * red + 0.7152 * green + 0.0722 * blue }
 
+    /// Linear per-channel mix toward `other` by `fraction` (0 = self, 1 = other).
+    func blended(toward other: ThemeColor, fraction: Double) -> ThemeColor {
+        let f = min(1, max(0, fraction))
+        return ThemeColor(red: red + (other.red - red) * f,
+                          green: green + (other.green - green) * f,
+                          blue: blue + (other.blue - blue) * f)
+    }
+
     /// HSB components for the sunburst's per-depth saturation/brightness ramps. Pure math —
     /// callable from the detached layout pass.
     var hsb: (hue: Double, saturation: Double, brightness: Double) {
@@ -93,6 +101,34 @@ struct Theme: Codable, Equatable, Identifiable, Sendable {
     /// The control scheme a custom background needs; nil when following the system.
     var colorScheme: ColorScheme? {
         background.map { $0.luminance < 0.5 ? .dark : .light }
+    }
+
+    /// Elevated-surface color for sheets and auxiliary windows, derived from the background
+    /// (slightly lifted toward white on dark themes, near-white on light ones); nil when the
+    /// theme follows the system.
+    var surface: ThemeColor? {
+        guard let background else { return nil }
+        let white = ThemeColor(red: 1, green: 1, blue: 1)
+        return background.luminance < 0.5
+            ? background.blended(toward: white, fraction: 0.06)
+            : background.blended(toward: white, fraction: 0.55)
+    }
+}
+
+/// Applies the theme to a presented sheet: elevated surface background, the theme's control
+/// scheme, and its accent. A no-op for themes that follow the system.
+struct ThemedPresentation: ViewModifier {
+    let theme: Theme
+
+    func body(content: Content) -> some View {
+        let themed = content
+            .tint(theme.accent.color)
+            .preferredColorScheme(theme.colorScheme)
+        if let surface = theme.surface {
+            themed.presentationBackground(surface.color)
+        } else {
+            themed
+        }
     }
 }
 
@@ -143,17 +179,20 @@ final class ThemeStore {
               colors: [ThemeColor(hex: 0x3D86F2), ThemeColor(hex: 0x35C4D7),
                        ThemeColor(hex: 0x6558F5), ThemeColor(hex: 0x4FD8A7),
                        ThemeColor(hex: 0x8AA8FF)],
-              accent: ThemeColor(hex: 0x35C4D7)),
+              accent: ThemeColor(hex: 0x35C4D7),
+              background: ThemeColor(hex: 0x0B1626)),
         Theme(id: "sunset", name: "Sunset",
               colors: [ThemeColor(hex: 0xF55D78), ThemeColor(hex: 0xFA8F3E),
                        ThemeColor(hex: 0xFAC53E), ThemeColor(hex: 0xB04FFB),
                        ThemeColor(hex: 0xF2695C)],
-              accent: ThemeColor(hex: 0xFA8F3E)),
+              accent: ThemeColor(hex: 0xFA8F3E),
+              background: ThemeColor(hex: 0x1C1014)),
         Theme(id: "violet", name: "Violet",
               colors: [ThemeColor(hex: 0x8D41FF), ThemeColor(hex: 0xB892FF),
                        ThemeColor(hex: 0x6F2FD6), ThemeColor(hex: 0xD0B3FF),
                        ThemeColor(hex: 0x5B21B8)],
-              accent: ThemeColor(hex: 0x8D41FF)),
+              accent: ThemeColor(hex: 0x8D41FF),
+              background: ThemeColor(hex: 0x120B24)),
     ]
 
     /// The default theme (Stackdust) — the selection fallback; not the first in the list.

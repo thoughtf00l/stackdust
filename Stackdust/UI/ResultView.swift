@@ -4,6 +4,9 @@ import StackdustCore
 struct ResultView: View {
     let model: AppModel
 
+    /// The active theme, for painting the Reclaim sheet's presentation.
+    @Environment(ThemeStore.self) private var themeStore
+
     /// Shared between the sunburst and the contents panel for bidirectional highlighting.
     @State private var hovered: FileNode?
 
@@ -146,6 +149,7 @@ struct ResultView: View {
         }
         .sheet(isPresented: reclaimPresentedBinding) {
             ReclaimView(model: model)
+                .modifier(ThemedPresentation(theme: themeStore.selected))
                 .frame(
                     minWidth: 560, idealWidth: 640,
                     minHeight: 480, idealHeight: 620

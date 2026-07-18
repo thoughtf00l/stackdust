@@ -15,6 +15,18 @@ struct ThemeSettingsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 640, height: 420)
+        // The Settings window wears the theme too: surface color, control scheme, accent.
+        .background(surfaceStyle, ignoresSafeAreaEdges: .all)
+        .preferredColorScheme(store.selected.colorScheme)
+        .tint(store.selected.accent.color)
+    }
+
+    private var surfaceStyle: AnyShapeStyle {
+        if let surface = store.selected.surface {
+            AnyShapeStyle(surface.color)
+        } else {
+            AnyShapeStyle(.windowBackground)
+        }
     }
 
     private var themeList: some View {
@@ -35,6 +47,7 @@ struct ThemeSettingsView: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(store.selected.background == nil ? .automatic : .hidden)
     }
 
     private var selectionBinding: Binding<String?> {
