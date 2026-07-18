@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Stackdust</title>
+    <item>
+      <title>1.0.7</title>
+      <pubDate>Sat, 18 Jul 2026 10:02:27 GMT</pubDate>
+      <sparkle:version>1.0.7</sparkle:version>
+      <sparkle:shortVersionString>1.0.7</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <description>DiscFree is now Stackdust, and this release makes it self-sufficient: the app checks for updates itself (app menu → Check for Updates…) and installs them in place via Sparkle. Downloads now ship as a drag-to-Applications DMG. New chart themes with a settings pane (⌘,): pick a palette, edit colors live, or build your own — including custom window backgrounds. Settings and the Full Disk Access grant carry over from DiscFree. Homebrew users: the cask is now thoughtf00l/tap/stackdust.</description>
+      <enclosure url="https://github.com/thoughtf00l/stackdust/releases/download/v1.0.7/Stackdust-1.0.7.zip" sparkle:edSignature="lAk+TTRSxo5ycJcEObUJEd5XwHS35TIAPreLZmF2gjggs1Lm3/ylJjnj5cJnG3xxe1xKMkqxlCKawkqWBYRgDg==" length="3672242" type="application/octet-stream"/>
+    </item>
+  </channel>
+</rss>
