@@ -1,8 +1,8 @@
-# DiscFree
+# Stackdust
 
 A macOS disk-space analyzer that knows what developer junk looks like.
 
-DiscFree scans a folder (or the whole disk), shows where the space went as an
+Stackdust scans a folder (or the whole disk), shows where the space went as an
 interactive sunburst chart, and highlights things that are safe to reclaim:
 Xcode DerivedData, old simulators, package-manager caches, `node_modules`,
 Rust `target` directories, Docker VM disks, and more. Cleanup always moves
@@ -10,9 +10,9 @@ items to the Trash — nothing is ever deleted permanently.
 
 It ships in two forms sharing the same scanning core:
 
-- **DiscFree.app** — a SwiftUI app with a sunburst chart, dev-junk highlighting,
+- **Stackdust.app** — a SwiftUI app with a sunburst chart, dev-junk highlighting,
   and one-click Move to Trash.
-- **`discfree` CLI** — built for AI coding agents and scripts: JSON output,
+- **`stackdust` CLI** — built for AI coding agents and scripts: JSON output,
   stable exit codes, never interactive, same Trash-only safety contract.
 
 ## How this was built
@@ -33,7 +33,7 @@ Requires macOS 15 (Sequoia) or later. The app is a universal binary
 ```sh
 brew tap thoughtf00l/tap
 brew trust thoughtf00l/tap   # one-time, required by Homebrew 6+
-brew install --cask discfree
+brew install --cask stackdust
 ```
 
 The app is not notarized; the cask clears the macOS quarantine flag on
@@ -41,13 +41,13 @@ install, so it opens without a Gatekeeper prompt.
 
 ### Manual download
 
-Download `DiscFree.zip` from the [latest release](https://github.com/thoughtf00l/discFree/releases/latest),
+Download `Stackdust.zip` from the [latest release](https://github.com/thoughtf00l/stackdust/releases/latest),
 unzip it into `/Applications`, then either allow the app in
 System Settings → Privacy & Security → **Open Anyway**, or clear the
 quarantine flag yourself:
 
 ```sh
-xattr -d com.apple.quarantine /Applications/DiscFree.app
+xattr -d com.apple.quarantine /Applications/Stackdust.app
 ```
 
 ### Build from source
@@ -55,14 +55,14 @@ xattr -d com.apple.quarantine /Applications/DiscFree.app
 Requires Xcode 16 or later.
 
 ```sh
-git clone https://github.com/thoughtf00l/discFree.git
-cd discFree
+git clone https://github.com/thoughtf00l/stackdust.git
+cd stackdust
 
 # The app
-xcodebuild -project DiscFree.xcodeproj -scheme DiscFree -configuration Release build
+xcodebuild -project Stackdust.xcodeproj -scheme Stackdust -configuration Release build
 
 # The CLI
-swift build -c release   # binary lands at .build/release/discfree
+swift build -c release   # binary lands at .build/release/stackdust
 ```
 
 ## Full Disk Access
@@ -70,15 +70,15 @@ swift build -c release   # binary lands at .build/release/discfree
 Scanning protected locations (`~/Library`, Desktop, Documents, …) requires
 Full Disk Access — grant it in System Settings → Privacy & Security →
 Full Disk Access. For the CLI, grant it to the **terminal app** the CLI runs
-in, not to `discfree` itself. Scanning unprotected paths needs no setup.
+in, not to `stackdust` itself. Scanning unprotected paths needs no setup.
 
-## The `discfree` CLI
+## The `stackdust` CLI
 
 ```sh
-discfree scan ~/dev --json        # disk usage as a size-sorted tree
-discfree dev ~/dev --json         # developer-reclaimable items, largest first
-discfree clean ~/dev --category xcodeBuild --min-size 500M   # prints the plan, touches nothing
-discfree clean ~/dev --category xcodeBuild --min-size 500M --yes   # moves to Trash
+stackdust scan ~/dev --json        # disk usage as a size-sorted tree
+stackdust dev ~/dev --json         # developer-reclaimable items, largest first
+stackdust clean ~/dev --category xcodeBuild --min-size 500M   # prints the plan, touches nothing
+stackdust clean ~/dev --category xcodeBuild --min-size 500M --yes   # moves to Trash
 ```
 
 Without `--yes`, `clean` only prints what it would do. With `--yes`, selected

@@ -1,32 +1,32 @@
-# DiscFree
+# Stackdust
 
 A macOS disk-space analyzer: a GUI app (sunburst chart, safe Move-to-Trash) and an
-agent-friendly CLI (`discfree`) sharing one core (`DiscFreeCore`). The CLI is designed
+agent-friendly CLI (`stackdust`) sharing one core (`StackdustCore`). The CLI is designed
 for AI coding agents as first-class users: JSON output, stable exit codes, never
 interactive, never deletes permanently.
 
 ## Repository layout
 
-- `Sources/DiscFreeCore/` — shared core: parallel disk scanner (`DiskScanner` →
+- `Sources/StackdustCore/` — shared core: parallel disk scanner (`DiskScanner` →
   `FileNode` tree), dev-item rules (`DevItemCatalog`), classification
   (`DevClassifier`), tree mutation (`TreeEditor`).
-- `Sources/DiscFreeCLI/` — all CLI command logic (library, unit-tested).
-- `Sources/discfree/` — thin CLI executable entry point.
-- `DiscFree/` — the macOS app (SwiftUI); built by `DiscFree.xcodeproj`, consumes the
+- `Sources/StackdustCLI/` — all CLI command logic (library, unit-tested).
+- `Sources/stackdust/` — thin CLI executable entry point.
+- `Stackdust/` — the macOS app (SwiftUI); built by `Stackdust.xcodeproj`, consumes the
   local package.
-- `Tests/` — package tests (core + CLI). `DiscFreeTests/` — app/UI tests.
+- `Tests/` — package tests (core + CLI). `StackdustTests/` — app/UI tests.
 
 ## Build and test
 
 ```sh
 swift build                       # package: core + CLI
 swift test                        # package tests
-swift run discfree --help        # run the CLI from source
-xcodebuild -project DiscFree.xcodeproj -scheme DiscFree -configuration Debug build   # app
-xcodebuild test -project DiscFree.xcodeproj -scheme DiscFree -destination 'platform=macOS'  # app tests
+swift run stackdust --help        # run the CLI from source
+xcodebuild -project Stackdust.xcodeproj -scheme Stackdust -configuration Debug build   # app
+xcodebuild test -project Stackdust.xcodeproj -scheme Stackdust -destination 'platform=macOS'  # app tests
 ```
 
-The built CLI binary lands at `.build/debug/discfree`.
+The built CLI binary lands at `.build/debug/stackdust`.
 
 ## Conventions for working on this repo
 
@@ -40,7 +40,7 @@ The built CLI binary lands at `.build/debug/discfree`.
   never `removeItem`.
 - Before claiming a change works, run the builds and tests above.
 
-## Using the `discfree` CLI (for agents)
+## Using the `stackdust` CLI (for agents)
 
 General contract:
 
@@ -65,7 +65,7 @@ Exit codes:
 | 4 | permission denied on the scan root (likely Full Disk Access, see below) |
 | 5 | partial failure: some `clean --yes` operations failed |
 
-### `discfree scan <path> [--json] [--depth N] [--top N] [--min-size SIZE]`
+### `stackdust scan <path> [--json] [--depth N] [--top N] [--min-size SIZE]`
 
 Disk usage as a size-sorted tree. Defaults: `--depth 2`, `--top 20` children per
 directory. JSON shape:
@@ -92,7 +92,7 @@ disk space, so their size is 0 and they are intentionally not descended into. Th
 not overlap: `unreadable_count` no longer includes evicted directories. `cloud_evicted` mirrors
 `unreadable` — present on a node only when true.
 
-### `discfree dev <path> [--json] [--min-size SIZE]`
+### `stackdust dev <path> [--json] [--min-size SIZE]`
 
 Reclaimable items (Xcode DerivedData/Archives/DeviceSupport, simulators,
 package-manager caches, `node_modules`, Rust `target` next to a `Cargo.toml`,
@@ -121,7 +121,7 @@ paying network and time — `packageCache`, `projectArtifacts`, `appCaches`,
 groups items under a per-category header (`displayName — total [risk]`), largest
 category first.
 
-### `discfree clean <path> [--json] [--category c1,c2] [--min-size SIZE] [--yes] [--dry-run]`
+### `stackdust clean <path> [--json] [--category c1,c2] [--min-size SIZE] [--yes] [--dry-run]`
 
 Safety contract:
 
@@ -149,7 +149,7 @@ Recommended agent flow: `dev --json` → decide → `clean --category ... --min-
 ### Full Disk Access (macOS TCC)
 
 Reading protected locations (`~/Library`, Desktop, Documents, ...) requires Full
-Disk Access for the **terminal app** the CLI runs in, not for `discfree` itself.
+Disk Access for the **terminal app** the CLI runs in, not for `stackdust` itself.
 On a permission failure the CLI exits 4 with a structured hint. Grant it in
 System Settings → Privacy & Security → Full Disk Access, then restart the terminal.
 Scanning unprotected paths needs no setup.
