@@ -45,11 +45,15 @@ struct StartView: View {
                         .font(.headline)
                         .foregroundStyle(.secondary)
                     ForEach(volumes) { volume in
+                        // A plain button with its own backdrop: bordered buttons (Tahoe)
+                        // insist on tinting custom label content with the accent color,
+                        // which sinks into themed backgrounds.
                         Button {
                             model.startScan(at: volume.url)
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: volume.isInternal ? "internaldrive" : "externaldrive")
+                                    .foregroundStyle(.secondary)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(volume.name)
                                     Text(caption(for: volume))
@@ -58,13 +62,12 @@ struct StartView: View {
                                 }
                                 Spacer()
                             }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
                             .contentShape(Rectangle())
-                            // Applied to the label content itself: the bordered style would
-                            // otherwise render the custom HStack in the accent tint, which
-                            // sinks into themed backgrounds.
-                            .foregroundStyle(.primary)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.plain)
+                        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
                     }
                 }
                 .frame(maxWidth: 420)
