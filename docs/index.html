@@ -87,6 +87,25 @@
   .shot img { width: 100%; height: auto; display: block; }
   .shot figcaption { color: var(--muted); font-size: 13.5px; margin-top: 4px; text-align: center; }
 
+  .showcase-track { height: 220vh; margin-top: 24px; }
+  .showcase-sticky { position: sticky; top: 7vh; }
+  .showcase-frame {
+    position: relative; max-width: 900px; margin: 0 auto;
+    aspect-ratio: 2280 / 1638;
+  }
+  .showcase-frame img {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+  }
+  .showcase-frame .shot-reclaim { opacity: 0; will-change: opacity; }
+  .showcase-caption {
+    position: relative; height: 1.7em; margin-top: 6px;
+    text-align: center; color: var(--muted); font-size: 14px;
+  }
+  .showcase-caption span {
+    position: absolute; inset: 0; opacity: 0; transition: opacity .25s ease;
+  }
+  .showcase-caption span.active { opacity: 1; }
+
   section { padding: 72px 0; }
   .kicker {
     text-transform: uppercase; letter-spacing: .14em; font-size: 12.5px; font-weight: 700;
@@ -170,7 +189,8 @@
   <div class="wrap">
     <h2>A UI for humans.</h2>
     <p class="lead">One scan draws your disk as a sunburst — every ring a directory level, every arc sized by what it actually takes on disk. The Reclaim pane groups dev junk by category and honest risk tier, and cleanup only ever means <em>move to Trash</em>.</p>
-    <div class="shots">
+    <!-- No-JS fallback: both windows side by side. Hidden when the scroll showcase runs. -->
+    <div class="shots" id="shots-static">
       <figure class="shot">
         <img src="assets/main-window.png" alt="Stackdust main window: sunburst chart of a disk with the contents panel" loading="lazy">
         <figcaption>The sunburst: click to drill in, hover to inspect, highlight what's reclaimable.</figcaption>
@@ -179,6 +199,21 @@
         <img src="assets/reclaim.png" alt="Stackdust Reclaim pane: dev junk grouped by category with risk badges" loading="lazy">
         <figcaption>Reclaim: caches, builds, and simulators grouped by category, each with its risk tier.</figcaption>
       </figure>
+    </div>
+
+    <!-- Scroll showcase: the main window pins while scrolling and the Reclaim pane fades in
+         over it, like the sheet opening in the app. -->
+    <div class="showcase-track" id="showcase" hidden>
+      <div class="showcase-sticky">
+        <div class="showcase-frame">
+          <img src="assets/main-window.png" alt="Stackdust main window: sunburst chart of a disk with the contents panel">
+          <img class="shot-reclaim" src="assets/reclaim.png" alt="Stackdust Reclaim pane: dev junk grouped by category with risk badges">
+        </div>
+        <p class="showcase-caption">
+          <span data-step="0">The sunburst: click to drill in, hover to inspect. Keep scrolling…</span>
+          <span data-step="1">Reclaim: caches, builds, and simulators grouped by category, each with its risk tier.</span>
+        </p>
+      </div>
     </div>
   </div>
 </section>
@@ -238,6 +273,38 @@ brew install --cask stackdust</pre>
   </div>
 </footer>
 
+<script>
+// Scroll showcase: pin the app window and fade the Reclaim pane in over it as the
+// visitor scrolls, like the sheet opening in the app. The static two-image grid
+// stays as the no-JS fallback.
+(function () {
+  const track = document.getElementById('showcase');
+  const fallback = document.getElementById('shots-static');
+  if (!track || !fallback) return;
+  fallback.hidden = true;
+  track.hidden = false;
+
+  const reclaim = track.querySelector('.shot-reclaim');
+  const captions = track.querySelectorAll('.showcase-caption span');
+  const clamp = (v) => Math.min(1, Math.max(0, v));
+
+  function update() {
+    const rect = track.getBoundingClientRect();
+    const scrollable = rect.height - innerHeight;
+    const progress = scrollable > 0 ? clamp(-rect.top / scrollable) : 1;
+    // The sheet fades in across the middle of the section's scroll range.
+    const t = clamp((progress - 0.35) / 0.3);
+    reclaim.style.opacity = t;
+    captions.forEach((span) => {
+      span.classList.toggle('active', (span.dataset.step === '1') === (t > 0.5));
+    });
+  }
+
+  addEventListener('scroll', update, { passive: true });
+  addEventListener('resize', update, { passive: true });
+  update();
+})();
+</script>
 
 </body>
 </html>
